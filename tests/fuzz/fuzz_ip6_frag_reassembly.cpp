@@ -137,7 +137,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         uint16_t offset      = fdp.ConsumeUint16() & 0x1fff;
         bool     more        = fdp.ConsumeUint8() & 1;
         uint8_t  payloadLen  = fdp.ConsumeUint8() % 128;
-        const uint8_t *payload = fdp.ConsumeBytes(payloadLen);
+        size_t         actualPayloadLen = payloadLen;
+        const uint8_t *payload          = fdp.ConsumeBytes(actualPayloadLen);
 
         otMessage *message = otIp6NewMessage(&node.GetInstance(), nullptr);
         if (message == nullptr) break;
