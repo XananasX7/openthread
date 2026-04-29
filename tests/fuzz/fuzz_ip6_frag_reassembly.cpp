@@ -83,7 +83,7 @@ public:
 
     size_t RemainingBytes(void) { return mSize; }
 
-    const uint8_t *ConsumeBytes(size_t aSize)
+    const uint8_t *ConsumeBytes(size_t &aSize)
     {
         if (aSize > mSize) aSize = mSize;
         const uint8_t *data = mData;
@@ -137,8 +137,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         uint16_t offset      = fdp.ConsumeUint16() & 0x1fff;
         bool     more        = fdp.ConsumeUint8() & 1;
         uint8_t  payloadLen  = fdp.ConsumeUint8() % 128;
-        size_t         actualPayloadLen = payloadLen;
-        const uint8_t *payload          = fdp.ConsumeBytes(actualPayloadLen);
+        size_t actualPayloadLen = static_cast<size_t>(payloadLen);
+        const uint8_t *payload = fdp.ConsumeBytes(actualPayloadLen);
 
         otMessage *message = otIp6NewMessage(&node.GetInstance(), nullptr);
         if (message == nullptr) break;
@@ -161,7 +161,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
         IgnoreError(otMessageAppend(message, &header, sizeof(header)));
         IgnoreError(otMessageAppend(message, &fragHeader, sizeof(fragHeader)));
-        IgnoreError(otMessageAppend(message, payload, payloadLen));
+        IgnoreError(otMessageAppend(message, payload, static_cast<uint16_t>(actualPayloadLen)));
 
         IgnoreError(otIp6Send(&node.GetInstance(), message));
         
