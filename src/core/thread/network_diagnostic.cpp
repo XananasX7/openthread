@@ -432,8 +432,14 @@ Error Server::AppendDiagTlv(uint8_t aTlvType, Message &aMessage)
     }
 
     case Tlv::kRoute:
-        SuccessOrExit(error = Get<RouterTable>().AppendRouteTlv(aMessage, Tlv::kRoute));
+    {
+        RouteTlv tlv;
+
+        tlv.Init();
+        Get<RouterTable>().FillRouteTlv(tlv);
+        SuccessOrExit(error = tlv.AppendTo(aMessage));
         break;
+    }
 
     case Tlv::kEnhancedRoute:
         error = AppendEnhancedRoute(aMessage);

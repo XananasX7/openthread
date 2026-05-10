@@ -33,7 +33,6 @@ set(COMMON_INCLUDES
 
 set(COMMON_SOURCES
     cli.cpp
-    cli_api.cpp
     cli_ba.cpp
     cli_bbr.cpp
     cli_br.cpp

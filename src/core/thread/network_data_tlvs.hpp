@@ -1128,10 +1128,7 @@ public:
      * @retval TRUE   If the TLV appears to be well-formed.
      * @retval FALSE  If the TLV does not appear to be well-formed.
      */
-    bool IsValid(void) const
-    {
-        return (GetLength() >= sizeof(*this) - sizeof(NetworkDataTlv)) && (GetContextId() != 0);
-    }
+    bool IsValid(void) const { return GetLength() >= sizeof(*this) - sizeof(NetworkDataTlv); }
 
     /**
      * Indicates whether or not the Compress flag is set.

@@ -219,21 +219,16 @@ exit:
     return error;
 }
 
-Error Lowpan::Compress(Message              &aMessage,
-                       const Mac::Addresses &aMacAddrs,
-                       FrameBuilder         &aFrameBuilder,
-                       uint8_t               aRecursionDepth)
+Error Lowpan::Compress(Message &aMessage, const Mac::Addresses &aMacAddrs, FrameBuilder &aFrameBuilder)
 {
     Error   error       = kErrorNone;
     uint8_t headerDepth = 0xff;
-
-    VerifyOrExit(aRecursionDepth <= kMaxRecursionDepth, error = kErrorParse);
 
     while (headerDepth > 0)
     {
         FrameBuilder frameBuilder = aFrameBuilder;
 
-        error = Compress(aMessage, aMacAddrs, aFrameBuilder, headerDepth, aRecursionDepth);
+        error = Compress(aMessage, aMacAddrs, aFrameBuilder, headerDepth);
 
         // We exit if `Compress()` is successful. Otherwise we reset
         // the `aFrameBuidler` to its earlier state (remove all
@@ -251,8 +246,7 @@ exit:
 Error Lowpan::Compress(Message              &aMessage,
                        const Mac::Addresses &aMacAddrs,
                        FrameBuilder         &aFrameBuilder,
-                       uint8_t              &aHeaderDepth,
-                       uint8_t               aRecursionDepth)
+                       uint8_t              &aHeaderDepth)
 {
     Error       error       = kErrorNone;
     uint16_t    startOffset = aMessage.GetOffset();
@@ -419,7 +413,7 @@ Error Lowpan::Compress(Message              &aMessage,
             // For IP-in-IP the NH bit of the LOWPAN_NHC encoding MUST be set to zero.
             SuccessOrExit(error = aFrameBuilder.AppendUint8(kExtHdrDispatch | kExtHdrEidIp6));
 
-            error = Compress(aMessage, aMacAddrs, aFrameBuilder, aRecursionDepth + 1);
+            error = Compress(aMessage, aMacAddrs, aFrameBuilder);
 
             OT_FALL_THROUGH;
 

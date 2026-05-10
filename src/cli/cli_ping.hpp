@@ -81,6 +81,8 @@ private:
     static void HandlePingStatistics(const otPingSenderStatistics *aStatistics, void *aContext);
     void        HandlePingStatistics(const otPingSenderStatistics *aStatistics);
 
+    void OutputResult(otError aError);
+
     bool mPingIsAsync : 1;
 };
 

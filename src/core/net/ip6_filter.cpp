@@ -56,12 +56,11 @@ Error Filter::Apply(const Message &aMessage) const
 
     VerifyOrExit(headers.GetDestinationAddress().IsLinkLocalUnicastOrMulticast());
 
-#if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
-    if (mAllowUnsecureWhenDisabled && Get<Mle::Mle>().IsDisabled())
+    // Allow all link-local IPv6 datagrams when Thread is not enabled
+    if (Get<Mle::Mle>().GetRole() == Mle::kRoleDisabled)
     {
         ExitNow(error = kErrorNone);
     }
-#endif
 
     dstPort = headers.GetDestinationPort();
 

@@ -63,7 +63,8 @@ extern "C" void platformRadioInit(const char *aUrl) { sRadio.Init(aUrl); }
 const char Radio::kLogModuleName[] = "Radio";
 
 Radio::Radio(void)
-    : mRadioSpinel()
+    : mRadioUrl(nullptr)
+    , mRadioSpinel()
 #if OPENTHREAD_POSIX_CONFIG_RCP_CAPS_DIAG_ENABLE
     , mRcpCapsDiag(mRadioSpinel)
 #endif
@@ -79,10 +80,8 @@ OT_TOOL_WEAK void platformCoprocessorResetFailed(void *) {}
 
 void Radio::Init(const char *aUrl)
 {
-    bool      resetRadio;
-    bool      skipCompatibilityCheck;
-    RadioUrl &radioUrl = SpinelManager::GetSpinelManager().GetRadioUrl();
-
+    bool resetRadio;
+    bool skipCompatibilityCheck;
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2 && OPENTHREAD_CONFIG_MAC_CSL_TRANSMITTER_ENABLE
     bool aEnableRcpTimeSync = true;
 #else
@@ -90,8 +89,8 @@ void Radio::Init(const char *aUrl)
 #endif
     struct ot::Spinel::RadioSpinelCallbacks callbacks;
 
-    VerifyOrDie(radioUrl.GetPath() != nullptr, OT_EXIT_INVALID_ARGUMENTS);
-    OT_UNUSED_VARIABLE(aUrl);
+    mRadioUrl.Init(aUrl);
+    VerifyOrDie(mRadioUrl.GetPath() != nullptr, OT_EXIT_INVALID_ARGUMENTS);
 
     memset(&callbacks, 0, sizeof(callbacks));
     callbacks.mEnergyScanDone    = otPlatRadioEnergyScanDone;
@@ -106,8 +105,8 @@ void Radio::Init(const char *aUrl)
     mTmpStorage.Init();
 #endif
 
-    resetRadio             = !radioUrl.HasParam("no-reset");
-    skipCompatibilityCheck = radioUrl.HasParam("skip-rcp-compatibility-check");
+    resetRadio             = !mRadioUrl.HasParam("no-reset");
+    skipCompatibilityCheck = mRadioUrl.HasParam("skip-rcp-compatibility-check");
 
 #if OPENTHREAD_SPINEL_CONFIG_COPROCESSOR_RESET_FAILURE_CALLBACK_ENABLE
     GetSpinelDriver().SetCoprocessorResetFailureCallback(platformCoprocessorResetFailed, this);
@@ -117,7 +116,7 @@ void Radio::Init(const char *aUrl)
     mRadioSpinel.Init(skipCompatibilityCheck, resetRadio, &GetSpinelDriver(),
                       (skipCompatibilityCheck ? 0 : kRequiredRadioCaps), aEnableRcpTimeSync);
 
-    ProcessRadioUrl(radioUrl);
+    ProcessRadioUrl(mRadioUrl);
 }
 
 void Radio::Deinit(void)
@@ -202,21 +201,17 @@ void Radio::ProcessMaxPowerTable(const RadioUrl &aRadioUrl)
 
 #if OPENTHREAD_POSIX_CONFIG_MAX_POWER_TABLE_ENABLE
     otError          error;
-    constexpr int8_t kPowerDefault     = 30; // Default power 1 watt (30 dBm).
-    char            *str               = nullptr;
-    char            *pSave             = nullptr;
-    uint8_t          channel           = ot::Radio::kChannelMin;
-    int8_t           power             = kPowerDefault;
-    const char      *maxPowerTable     = nullptr;
-    char            *maxPowerTableCopy = nullptr;
+    constexpr int8_t kPowerDefault = 30; // Default power 1 watt (30 dBm).
+    const char      *str           = nullptr;
+    char            *pSave         = nullptr;
+    uint8_t          channel       = ot::Radio::kChannelMin;
+    int8_t           power         = kPowerDefault;
+    const char      *maxPowerTable;
 
     VerifyOrExit((maxPowerTable = aRadioUrl.GetValue("max-power-table")) != nullptr);
 
-    maxPowerTableCopy = strdup(maxPowerTable);
-    VerifyOrDie(maxPowerTableCopy != nullptr, OT_EXIT_FAILURE);
-
-    for (str = strtok_r(maxPowerTableCopy, ",", &pSave); str != nullptr && channel <= ot::Radio::kChannelMax;
-         str = strtok_r(nullptr, ",", &pSave))
+    for (str = strtok_r(const_cast<char *>(maxPowerTable), ",", &pSave);
+         str != nullptr && channel <= ot::Radio::kChannelMax; str = strtok_r(nullptr, ",", &pSave))
     {
         power = static_cast<int8_t>(strtol(str, nullptr, 0));
         error = mRadioSpinel.SetChannelMaxTransmitPower(channel, power);
@@ -245,10 +240,6 @@ void Radio::ProcessMaxPowerTable(const RadioUrl &aRadioUrl)
     VerifyOrDie(str == nullptr, OT_EXIT_INVALID_ARGUMENTS);
 
 exit:
-    if (maxPowerTableCopy != nullptr)
-    {
-        free(maxPowerTableCopy);
-    }
     return;
 #endif // OPENTHREAD_POSIX_CONFIG_MAX_POWER_TABLE_ENABLE
 }

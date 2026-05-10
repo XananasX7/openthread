@@ -64,16 +64,6 @@ public:
     typedef otNeighborTableEntryInfo EntryInfo;
 
     /**
-     * Iterator used to iterate through neighbor table.
-     */
-    typedef otNeighborInfoIterator Iterator;
-
-    /**
-     * Initializer value for `Iterator`.
-     */
-    static constexpr Iterator kIteratorInit = OT_NEIGHBOR_INFO_ITERATOR_INIT;
-
-    /**
      * Defines the constants used in `NeighborTable::Callback` to indicate whether a child or router
      * neighbor is being added or removed.
      */
@@ -206,13 +196,13 @@ public:
      * the neighbor table.
      *
      * @param[in,out]  aIterator  A reference to the iterator context. To get the first neighbor entry
-                                  it should be set to `kIteratorInit`.
+                                  it should be set to OT_NEIGHBOR_INFO_ITERATOR_INIT.
      * @param[out]     aNeighInfo The neighbor information.
      *
      * @retval kErrorNone         Successfully found the next neighbor entry in table.
      * @retval kErrorNotFound     No subsequent neighbor entry exists in the table.
      */
-    Error GetNextNeighborInfo(Iterator &aIterator, Neighbor::Info &aNeighInfo);
+    Error GetNextNeighborInfo(otNeighborInfoIterator &aIterator, Neighbor::Info &aNeighInfo);
 
     /**
      * Registers the "neighbor table changed" callback function.
@@ -243,8 +233,6 @@ private:
 
     Callback mCallback;
 };
-
-DefineMapEnum(otNeighborTableEvent, NeighborTable::Event);
 
 } // namespace ot
 

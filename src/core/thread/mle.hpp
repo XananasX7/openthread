@@ -771,7 +771,7 @@ public:
      * @retval kErrorNone         Successfully set the router-eligible configuration.
      * @retval kErrorNotCapable   The device is not capable of becoming a router.
      */
-    Error SetRouterEligible(bool aEligible) { return mRoleTransitioner.SetRouterEligible(aEligible); }
+    Error SetRouterEligible(bool aEligible);
 
     /**
      * Indicates whether the router role is currently allowed.
@@ -782,7 +782,7 @@ public:
      * @retval TRUE   If the router role is allowed.
      * @retval FALSE  If the router role is not allowed.
      */
-    bool IsRouterRoleAllowed(void) const { return mRoleTransitioner.IsRouterRoleAllowed(); }
+    bool IsRouterRoleAllowed(void) const { return mRouterRoleAllowed; }
 
     /**
      * Indicates whether a node is the only router on the network.
@@ -928,14 +928,14 @@ public:
      *
      * @returns The ROUTER_SELECTION_JITTER value in seconds.
      */
-    uint8_t GetRouterSelectionJitter(void) const { return mRoleTransitioner.GetJitter(); }
+    uint8_t GetRouterSelectionJitter(void) const { return mRouterRoleTransition.GetJitter(); }
 
     /**
      * Sets the ROUTER_SELECTION_JITTER value.
      *
      * @param[in] aRouterJitter  The router selection jitter value (in seconds).
      */
-    void SetRouterSelectionJitter(uint8_t aRouterJitter) { mRoleTransitioner.SetJitter(aRouterJitter); }
+    void SetRouterSelectionJitter(uint8_t aRouterJitter) { mRouterRoleTransition.SetJitter(aRouterJitter); }
 
     /**
      * Indicates whether or not router role transition (upgrade from REED or downgrade to REED) is pending.
@@ -943,7 +943,7 @@ public:
      * @retval TRUE    Router role transition is pending.
      * @retval FALSE   Router role transition is not pending
      */
-    bool IsRouterRoleTransitionPending(void) const { return mRoleTransitioner.IsTransitionPending(); }
+    bool IsRouterRoleTransitionPending(void) const { return mRouterRoleTransition.IsPending(); }
 
     /**
      * Returns the current timeout delay in seconds till router role transition (upgrade from REED or downgrade to
@@ -951,35 +951,35 @@ public:
      *
      * @returns The timeout in seconds till router role transition, or zero if not pending role transition.
      */
-    uint8_t GetRouterRoleTransitionTimeout(void) const { return mRoleTransitioner.GetTimeout(); }
+    uint8_t GetRouterRoleTransitionTimeout(void) const { return mRouterRoleTransition.GetTimeout(); }
 
     /**
      * Returns the ROUTER_UPGRADE_THRESHOLD value.
      *
      * @returns The ROUTER_UPGRADE_THRESHOLD value.
      */
-    uint8_t GetRouterUpgradeThreshold(void) const { return mRoleTransitioner.GetUpgradeThreshold(); }
+    uint8_t GetRouterUpgradeThreshold(void) const { return mRouterUpgradeThreshold; }
 
     /**
      * Sets the ROUTER_UPGRADE_THRESHOLD value.
      *
      * @param[in]  aThreshold  The ROUTER_UPGRADE_THRESHOLD value.
      */
-    void SetRouterUpgradeThreshold(uint8_t aThreshold) { mRoleTransitioner.SetUpgradeThreshold(aThreshold); }
+    void SetRouterUpgradeThreshold(uint8_t aThreshold) { mRouterUpgradeThreshold = aThreshold; }
 
     /**
      * Returns the ROUTER_DOWNGRADE_THRESHOLD value.
      *
      * @returns The ROUTER_DOWNGRADE_THRESHOLD value.
      */
-    uint8_t GetRouterDowngradeThreshold(void) const { return mRoleTransitioner.GetDowngradeThreshold(); }
+    uint8_t GetRouterDowngradeThreshold(void) const { return mRouterDowngradeThreshold; }
 
     /**
      * Sets the ROUTER_DOWNGRADE_THRESHOLD value.
      *
      * @param[in]  aThreshold  The ROUTER_DOWNGRADE_THRESHOLD value.
      */
-    void SetRouterDowngradeThreshold(uint8_t aThreshold) { mRoleTransitioner.SetDowngradeThreshold(aThreshold); }
+    void SetRouterDowngradeThreshold(uint8_t aThreshold) { mRouterDowngradeThreshold = aThreshold; }
 
     /**
      * Indicates whether or not downgrading from router role to REED is blocked.
@@ -997,7 +997,7 @@ public:
      * @retval TRUE   The device is blocked from downgrading.
      * @retval FALSE  The device is not blocked from downgrading.
      */
-    bool IsDowngradeBlocked(void) const { return mRoleTransitioner.IsDowngradeBlocked(); }
+    bool IsDowngradeBlocked(void) const { return mBlockDowngrade; }
 
     /**
      * Returns the MLE_CHILD_ROUTER_LINKS value.
@@ -1022,7 +1022,7 @@ public:
      * @retval TRUE   If the REED is going to become a Router soon.
      * @retval FALSE  If the REED is not going to become a Router soon.
      */
-    bool WillBecomeRouterSoon(void) const { return mRoleTransitioner.WillBecomeRouterSoon(); }
+    bool WillBecomeRouterSoon(void) const;
 
     /**
      * Removes a link to a neighbor.
@@ -1179,14 +1179,14 @@ public:
      *
      * @param[in]  aEnabled  TRUE if the device was commissioned using CCM, FALSE otherwise.
      */
-    void SetCcmEnabled(bool aEnabled) { mRoleTransitioner.SetCcmEnabled(aEnabled); }
+    void SetCcmEnabled(bool aEnabled);
 
     /**
      * Sets whether the Security Policy TLV version-threshold for routing (VR field) is enabled.
      *
      * @param[in]  aEnabled  TRUE to enable Security Policy TLV version-threshold for routing, FALSE otherwise.
      */
-    void SetThreadVersionCheckEnabled(bool aEnabled) { mRoleTransitioner.SetThreadVersionCheckEnabled(aEnabled); }
+    void SetThreadVersionCheckEnabled(bool aEnabled);
 
     /**
      * Gets the current Interval Max value used by Advertisement trickle timer.
@@ -1322,6 +1322,7 @@ private:
     static constexpr uint8_t  kMleHopLimit                   = 255;
     static constexpr uint8_t  kMleSecurityTagSize            = 4;
     static constexpr uint32_t kDefaultStoreFrameCounterAhead = OPENTHREAD_CONFIG_STORE_FRAME_COUNTER_AHEAD;
+    static constexpr uint8_t  kMaxIpAddressesToRegister      = OPENTHREAD_CONFIG_MLE_IP_ADDRS_TO_REGISTER;
     static constexpr uint32_t kDefaultChildTimeout           = OPENTHREAD_CONFIG_MLE_CHILD_TIMEOUT_DEFAULT;
     static constexpr uint32_t kDefaultCslTimeout             = OPENTHREAD_CONFIG_CSL_TIMEOUT;
 
@@ -1347,7 +1348,6 @@ private:
     static constexpr uint8_t  kRouterDowngradeThreshold      = 23;
     static constexpr uint8_t  kRouterUpgradeThreshold        = 16;
     static constexpr uint16_t kDiscoveryMaxJitter            = 250; // Max jitter delay Discovery Responses (in msec).
-    static constexpr uint32_t kMaxScheduledDiscoveryResponse = 16;  // Rate-limit Discovery response.
     static constexpr uint16_t kUnsolicitedDataResponseJitter = 500; // Max delay for unsol Data Response (in msec).
     static constexpr uint8_t  kLeaderDowngradeExtraDelay     = 10;  // Extra delay to downgrade leader (in sec).
     static constexpr uint8_t  kDefaultLeaderWeight           = 64;
@@ -1474,6 +1474,16 @@ private:
         kAddrSolicitUnrecognizedReason = 6,
     };
 
+#if OPENTHREAD_FTD
+    enum UpdateRouterRoleAllowedReason : uint8_t // Used in `UpdateRouterRoleAllowed()`
+    {
+        kReasonMleInit,
+        kReasonDeviceModeChanged,
+        kReasonConfigParameterChanged,
+        kReasonSecurityPolicyChanged,
+    };
+#endif
+
     enum MessageAction : uint8_t
     {
         kMessageSend,
@@ -1594,8 +1604,7 @@ private:
         Error AppendCslClockAccuracyTlv(void);
 #endif
 #if OPENTHREAD_FTD
-        Error AppendRouteTlv(void);
-        Error AppendCompactRouteTlv(uint16_t aDestRloc16);
+        Error AppendRouteTlv(Neighbor *aNeighbor = nullptr);
         Error AppendActiveDatasetTlv(void);
         Error AppendPendingDatasetTlv(void);
         Error AppendConnectivityTlv(void);
@@ -1617,7 +1626,6 @@ private:
     private:
         Error AppendAddressRegistrationEntry(const Ip6::Address &aAddress);
         Error AppendDatasetTlv(MeshCoP::Dataset::Type aDatasetType);
-        Error AppendFullOrCompactRouteTlv(uint16_t aDestRloc16);
     };
 
     //- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1704,7 +1712,6 @@ private:
         Mac::ExtAddress mExtAddress;       // The neighbor/router extended address.
         TlvList         mRequestedTlvList; // The requested TLVs in Link Request.
         RxChallenge     mRxChallenge;      // The challenge in Link Request.
-        uint16_t        mRloc16;           // The neighbor/router RLOC16.
         uint8_t         mLinkMargin;       // Link margin of the received Link Request.
     };
 #endif
@@ -1777,16 +1784,15 @@ private:
             MessageType  mMessageType;
         };
 
-        void     AddSchedule(MessageType         aMessageType,
-                             const Ip6::Address &aDestination,
-                             uint32_t            aDelay,
-                             const void         *aInfo,
-                             uint16_t            aInfoSize);
-        void     Execute(const Schedule &aSchedule);
-        bool     HasMatchingSchedule(MessageType aMessageType, const Ip6::Address &aDestination) const;
-        void     RemoveMatchingSchedules(MessageType aMessageType, const Ip6::Address &aDestination);
-        uint32_t CountMatchingSchedules(MessageType aMessageType) const;
-        void     LogRemove(const Schedule &aSchedule);
+        void AddSchedule(MessageType         aMessageType,
+                         const Ip6::Address &aDestination,
+                         uint32_t            aDelay,
+                         const void         *aInfo,
+                         uint16_t            aInfoSize);
+        void Execute(const Schedule &aSchedule);
+        bool HasMatchingSchedule(MessageType aMessageType, const Ip6::Address &aDestination) const;
+        void RemoveMatchingSchedules(MessageType aMessageType, const Ip6::Address &aDestination);
+        void LogRemove(const Schedule &aSchedule);
 
         static bool Match(const Schedule &aSchedule, MessageType aMessageType, const Ip6::Address &aDestination);
 
@@ -2208,65 +2214,26 @@ private:
 
 #if OPENTHREAD_FTD
 
-    class RoleTransitioner : public InstanceLocator
+    class RouterRoleTransition
     {
-        // Manages the router role upgrade/downgrade transitions
-
     public:
-        enum UpdateRouterRoleAllowedReason : uint8_t // Used in `UpdateRouterRoleAllowed()`
-        {
-            kReasonMleInit,
-            kReasonDeviceModeChanged,
-            kReasonConfigParameterChanged,
-            kReasonSecurityPolicyChanged,
-        };
+        RouterRoleTransition(void);
 
-        explicit RoleTransitioner(Instance &aInstance);
-
-        bool    IsRouterRoleAllowed(void) const { return mRouterRoleAllowed; }
-        void    UpdateRouterRoleAllowed(UpdateRouterRoleAllowedReason aReason);
-        Error   SetRouterEligible(bool aEligible);
-        uint8_t GetJitter(void) const { return mJitter; }
-        void    SetJitter(uint8_t aJitter) { mJitter = aJitter; }
-        uint8_t GetUpgradeThreshold(void) const { return mUpgradeThreshold; }
-        void    SetUpgradeThreshold(uint8_t aThreshold) { mUpgradeThreshold = aThreshold; }
-        uint8_t GetDowngradeThreshold(void) const { return mDowngradeThreshold; }
-        void    SetDowngradeThreshold(uint8_t aThreshold) { mDowngradeThreshold = aThreshold; }
-        bool    IsDowngradeBlocked(void) const { return mDowngradeBlocked; }
-        void    SetDowngradeBlocked(bool aBlocked) { mDowngradeBlocked = aBlocked; }
-        bool    IsTransitionPending(void) const { return (mTimeout != 0); }
-        bool    WillBecomeRouterSoon(void) const;
+        bool    IsPending(void) const { return (mTimeout != 0); }
         void    StartTimeout(void);
         void    StopTimeout(void) { mTimeout = 0; }
         void    IncreaseTimeout(uint8_t aIncrement) { mTimeout += aIncrement; }
         uint8_t GetTimeout(void) const { return mTimeout; }
-        bool    IsRouterCountBelowUpgradeThreshold(void) const;
-        void    HandleTimeTick(void);
-        void    DecideWhetherToUpgrade(void);
-        void    DecideWhetherToDowngrade(uint8_t aNeighborId, const RouteTlv &aRouteTlv);
-#if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
-        void SetCcmEnabled(bool aEnabled);
-        void SetThreadVersionCheckEnabled(bool aEnabled);
-#endif
+        bool    HandleTimeTick(void);
+        uint8_t GetJitter(void) const { return mJitter; }
+        void    SetJitter(uint8_t aJitter) { mJitter = aJitter; }
 
     private:
-        bool DetermineIfRouterRoleAllowed(void) const;
-        bool NeighborHasComparableConnectivity(uint8_t aNeighborId, const RouteTlv &aRouteTlv) const;
-
-        bool mRouterEligible : 1;
-        bool mRouterRoleAllowed : 1;
-        bool mDowngradeBlocked : 1;
-#if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
-        bool mCcmEnabled : 1;
-        bool mThreadVersionCheckEnabled : 1;
-#endif
         uint8_t mTimeout;
         uint8_t mJitter;
-        uint8_t mUpgradeThreshold;
-        uint8_t mDowngradeThreshold;
     };
 
-#endif // OPENTHREAD_FTD
+#endif
 
     //------------------------------------------------------------------------------------------------------------------
 #if OPENTHREAD_CONFIG_P2P_ENABLE
@@ -2450,6 +2417,8 @@ private:
     void     ClearAlternateRloc16(void);
     uint8_t  SelectLeaderId(void) const;
     uint32_t SelectPartitionId(void) const;
+    bool     DetermineIfRouterRoleAllowed(void) const;
+    void     UpdateRouterRoleAllowed(UpdateRouterRoleAllowedReason aReason);
     void     DetermineConnectivity(Connectivity &aConnectivity) const;
     void     HandleDetachStart(void);
     void     HandleChildStart(void);
@@ -2497,6 +2466,8 @@ private:
     void     SetChildStateToValid(Child &aChild);
     bool     HasChildren(void);
     void     RemoveChildren(void);
+    bool     ShouldDowngrade(uint8_t aNeighborId, const RouteTlv &aRouteTlv) const;
+    bool     NeighborHasComparableConnectivity(const RouteTlv &aRouteTlv, uint8_t aNeighborId) const;
     void     HandleAdvertiseTrickleTimer(void);
     void     HandleTimeTick(void);
     void     HandleRouterTableEvent(RouterTable::Events aEvents);
@@ -2575,8 +2546,15 @@ private:
 
 #if OPENTHREAD_FTD
 
-    bool    mAddressSolicitPending : 1;
-    bool    mAddressSolicitRejected : 1;
+    bool mRouterEligible : 1;
+    bool mRouterRoleAllowed : 1;
+    bool mBlockDowngrade : 1;
+    bool mAddressSolicitPending : 1;
+    bool mAddressSolicitRejected : 1;
+#if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
+    bool mCcmEnabled : 1;
+    bool mThreadVersionCheckEnabled : 1;
+#endif
     uint8_t mRouterId;
     uint8_t mPreviousRouterId;
     uint8_t mNetworkIdTimeout;
@@ -2599,7 +2577,7 @@ private:
     TrickleTimer               mAdvertiseTrickleTimer;
     ChildTable                 mChildTable;
     RouterTable                mRouterTable;
-    RoleTransitioner           mRoleTransitioner;
+    RouterRoleTransition       mRouterRoleTransition;
     Ip6::Netif::UnicastAddress mLeaderAloc;
 #if OPENTHREAD_CONFIG_MLE_DEVICE_PROPERTY_LEADER_WEIGHT_ENABLE
     DeviceProperties mDeviceProperties;

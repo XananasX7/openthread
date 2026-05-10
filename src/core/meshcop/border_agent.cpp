@@ -35,7 +35,6 @@
 
 #if OPENTHREAD_CONFIG_BORDER_AGENT_ENABLE
 
-#include "common/num_utils.hpp"
 #include "instance/instance.hpp"
 #include "meshcop/border_agent_txt_data.hpp"
 
@@ -258,18 +257,7 @@ SecureSession *Manager::HandleAcceptSession(void *aContext, const Ip6::MessageIn
 
 Manager::CoapDtlsSession *Manager::HandleAcceptSession(void)
 {
-    CoapDtlsSession *session = nullptr;
-
-    if (mDtlsTransport.GetSessions().CountAllEntries() >= kMaxSessions)
-    {
-        LogWarn("Accept session failed: reached max concurrent secure sessions limit (%lu)", ToUlong(kMaxSessions));
-        ExitNow();
-    }
-
-    session = CoapDtlsSession::Allocate(GetInstance(), mDtlsTransport);
-
-exit:
-    return session;
+    return CoapDtlsSession::Allocate(GetInstance(), mDtlsTransport);
 }
 
 void Manager::HandleRemoveSession(void *aContext, SecureSession &aSession)
@@ -591,8 +579,7 @@ Manager::CoapDtlsSession::CoapDtlsSession(Instance &aInstance, Dtls::Transport &
     SetResourceHandler(&HandleResource);
     SetConnectCallback(&HandleConnected, this);
 
-    LogInfo("Allocating session %u - starting handshake timer for %lu ms", mIndex, ToUlong(kHandshakeTimeout));
-    mTimer.Start(kHandshakeTimeout);
+    LogInfo("Allocating session %u", mIndex);
 }
 
 Error Manager::CoapDtlsSession::SendMessage(OwnedPtr<Coap::Message> aMessage)
@@ -1162,13 +1149,8 @@ void Manager::CoapDtlsSession::HandleTimer(void)
         ResignEnroller();
 #endif
         LogInfo("Session %u timed out - disconnecting", mIndex);
+        DisconnectTimeout();
     }
-    else
-    {
-        LogInfo("Session %u handshake timeout - disconnecting", mIndex);
-    }
-
-    DisconnectTimeout();
 }
 
 void Manager::CoapDtlsSession::CopyInfoTo(SessionInfo &aInfo, UptimeMsec aUptimeNow) const

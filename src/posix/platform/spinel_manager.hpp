@@ -91,13 +91,6 @@ public:
         return *mSpinelInterface;
     }
 
-    /**
-     * Returns the radio URL.
-     *
-     * @returns The radio URL.
-     */
-    RadioUrl &GetRadioUrl(void) { return mUrl; }
-
 private:
 #if OPENTHREAD_POSIX_VIRTUAL_TIME
     void VirtualTimeInit(void);

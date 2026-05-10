@@ -180,10 +180,7 @@ public:
      *
      * @returns The size of the compressed header in bytes.
      */
-    Error Compress(Message              &aMessage,
-                   const Mac::Addresses &aMacAddrs,
-                   FrameBuilder         &aFrameBuilder,
-                   uint8_t               aRecursionDepth = 0);
+    Error Compress(Message &aMessage, const Mac::Addresses &aMacAddrs, FrameBuilder &aFrameBuilder);
 
     /**
      * Decompresses a LOWPAN_IPHC header.
@@ -315,8 +312,7 @@ private:
     Error Compress(Message              &aMessage,
                    const Mac::Addresses &aMacAddrs,
                    FrameBuilder         &aFrameBuilder,
-                   uint8_t              &aHeaderDepth,
-                   uint8_t               aRecursionDepth);
+                   uint8_t              &aHeaderDepth);
 
     Error CompressExtensionHeader(Message &aMessage, FrameBuilder &aFrameBuilder, uint8_t &aNextHeader);
     Error CompressSourceIid(const Mac::Address &aMacAddr,

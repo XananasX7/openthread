@@ -115,6 +115,8 @@ private:
 
     const char *LinkMetricsStatusToStr(otLinkMetricsStatus aStatus);
 
+    void OutputResult(otError aError);
+
     bool mQuerySync : 1;
     bool mConfigForwardTrackingSeriesSync : 1;
     bool mConfigEnhAckProbingSync : 1;

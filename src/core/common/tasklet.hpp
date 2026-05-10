@@ -69,12 +69,20 @@ public:
 
     public:
         /**
+         * Initializes the object.
+         */
+        Scheduler(void)
+            : mTail(nullptr)
+        {
+        }
+
+        /**
          * Indicates whether or not there are tasklets pending.
          *
          * @retval TRUE   If there are tasklets pending.
          * @retval FALSE  If there are no tasklets pending.
          */
-        bool AreTaskletsPending(void) const { return !mPostedQueue.IsEmpty(); }
+        bool AreTaskletsPending(void) const { return mTail != nullptr; }
 
         /**
          * Processes all tasklets queued when this is called.
@@ -82,26 +90,10 @@ public:
         void ProcessQueuedTasklets(void);
 
     private:
-        class Queue // A circular singly linked-list
-        {
-        public:
-            Queue(void)
-                : mTail(nullptr)
-            {
-            }
+        void PostTasklet(Tasklet &aTasklet);
+        void RemoveTasklet(Tasklet &aTasklet);
 
-            void     Clear(void) { mTail = nullptr; }
-            bool     IsEmpty(void) const { return (mTail == nullptr); }
-            void     PostTasklet(Tasklet &aTasklet);
-            void     RemoveTasklet(Tasklet &aTasklet);
-            Tasklet *PopTasklet(void);
-
-        private:
-            Tasklet *mTail;
-        };
-
-        Queue mPostedQueue;
-        Queue mRunningQueue;
+        Tasklet *mTail; // A circular singly linked-list
     };
 
     /**
