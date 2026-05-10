@@ -149,14 +149,24 @@ typedef TlvInfo<ThreadTlv::kThreadNetworkData> ThreadNetworkDataTlv;
 #if OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2
 
 /**
- * Defines IPv6 Addresses TLV constants and types.
+ * Defines IPv6 Addresses TLV constants and types and helper methods.
  */
 class Ip6AddressesTlv : public TlvInfo<ThreadTlv::kIp6Addresses>
 {
 public:
-    // Thread 1.2.0 5.19.13 limits the number of IPv6 addresses to [1, 15].
-    static constexpr uint8_t kMinAddresses = 1;
-    static constexpr uint8_t kMaxAddresses = OT_IP6_MAX_MLR_ADDRESSES;
+    /**
+     * Appends an IPv6 Addresses TLV to a message.
+     *
+     * @param[in,out] aMessage       The message to append to.
+     * @param[in]     aAddresses     A pointer to an array of IPv6 addresses.
+     * @param[in]     aNumAddresses  The number of IPv6 addresses in the @p aAddresses array.
+     *
+     * @retval kErrorNone     Successfully appended the TLV.
+     * @retval kErrorNoBufs   Insufficient available buffers to grow the message.
+     */
+    static Error AppendTo(Message &aMessage, const Ip6::Address *aAddresses, uint16_t aNumAddresses);
+
+    Ip6AddressesTlv(void) = delete;
 };
 
 #endif // OPENTHREAD_CONFIG_THREAD_VERSION >= OT_THREAD_VERSION_1_2

@@ -489,7 +489,7 @@ exit:
     return error;
 }
 
-Error Ip6::HandleOptions(Message &aMessage, const Header &aHeader, bool &aReceive)
+Error Ip6::HandleOptions(Message &aMessage, const Header &aHeader, bool &aReceive, bool aIsHopByHop)
 {
     Error          error        = kErrorNone;
     bool           hasMplOption = false;
@@ -516,7 +516,7 @@ Error Ip6::HandleOptions(Message &aMessage, const Header &aHeader, bool &aReceiv
             continue;
         }
 
-        if (option.GetType() == MplOption::kType)
+        if (aIsHopByHop && (option.GetType() == MplOption::kType))
         {
             VerifyOrExit(!hasMplOption, error = kErrorDrop);
             hasMplOption = true;
@@ -666,6 +666,7 @@ Error Ip6::HandleFragment(Message &aMessage)
     if (message == nullptr)
     {
         LogDebg("start reassembly");
+        VerifyOrExit(offset == 0, error = kErrorDrop);
         VerifyOrExit((message = NewMessage()) != nullptr, error = kErrorNoBufs);
         mReassemblyList.Enqueue(*message);
 
@@ -678,6 +679,10 @@ Error Ip6::HandleFragment(Message &aMessage)
 
         Get<TimeTicker>().RegisterReceiver(TimeTicker::kIp6FragmentReassembler);
     }
+    else
+    {
+        VerifyOrExit(offset == message->GetOffset(), error = kErrorDrop);
+    }
 
     // increase message buffer if necessary
     if (message->GetLength() < offset + payloadFragment + aMessage.GetOffset())
@@ -689,6 +694,8 @@ Error Ip6::HandleFragment(Message &aMessage)
     message->WriteBytesFromMessage(
         /* aWriteOffset */ aMessage.GetOffset() + offset, aMessage,
         /* aReadOffset */ aMessage.GetOffset() + sizeof(fragmentHeader), /* aLength */ payloadFragment);
+
+    message->SetOffset(offset + payloadFragment);
 
     // check if it is the last frame
     if (!fragmentHeader.IsMoreFlagSet())
@@ -817,10 +824,11 @@ Error Ip6::HandleExtensionHeaders(OwnedPtr<Message> &aMessagePtr,
         {
         case kProtoHopOpts:
             VerifyOrExit(first, error = kErrorDrop);
-            OT_FALL_THROUGH;
+            SuccessOrExit(error = HandleOptions(*aMessagePtr, aHeader, aReceive, /* aIsHopByHop */ true));
+            break;
 
         case kProtoDstOpts:
-            SuccessOrExit(error = HandleOptions(*aMessagePtr, aHeader, aReceive));
+            SuccessOrExit(error = HandleOptions(*aMessagePtr, aHeader, aReceive, /* aIsHopByHop */ false));
             break;
 
         case kProtoFragment:
@@ -845,6 +853,51 @@ Error Ip6::HandleExtensionHeaders(OwnedPtr<Message> &aMessagePtr,
 
 exit:
     return error;
+}
+
+bool Ip6::HasIp6InIpTunnel(const Message &aMessage, uint8_t aNextHeader) const
+{
+    bool        hasTunnel = false;
+    OffsetRange offsetRange;
+
+    offsetRange.InitFromMessageOffsetToEnd(aMessage);
+
+    while (!offsetRange.IsEmpty())
+    {
+        if (aNextHeader == kProtoIp6)
+        {
+            hasTunnel = true;
+            break;
+        }
+
+        if (aNextHeader == kProtoHopOpts || aNextHeader == kProtoDstOpts || aNextHeader == kProtoRouting)
+        {
+            ExtensionHeader extHeader;
+            uint16_t        size;
+
+            SuccessOrExit(aMessage.Read(offsetRange, extHeader));
+            size = extHeader.GetSize();
+            VerifyOrExit(offsetRange.Contains(size));
+            offsetRange.AdvanceOffset(size);
+            aNextHeader = extHeader.GetNextHeader();
+        }
+        else if (aNextHeader == kProtoFragment)
+        {
+            FragmentHeader fragHeader;
+
+            SuccessOrExit(aMessage.Read(offsetRange, fragHeader));
+            VerifyOrExit(offsetRange.Contains(sizeof(FragmentHeader)));
+            offsetRange.AdvanceOffset(sizeof(FragmentHeader));
+            aNextHeader = fragHeader.GetNextHeader();
+        }
+        else
+        {
+            break;
+        }
+    }
+
+exit:
+    return hasTunnel;
 }
 
 Error Ip6::TakeOrCopyMessagePtr(OwnedPtr<Message> &aTargetPtr,
@@ -1044,6 +1097,14 @@ Error Ip6::SendRaw(OwnedPtr<Message> aMessagePtr)
     SuccessOrExit(error = header.ParseFrom(*aMessagePtr));
     VerifyOrExit(!header.GetSource().IsMulticast(), error = kErrorInvalidSourceAddress);
 
+    aMessagePtr->SetOffset(sizeof(header));
+
+    if (aMessagePtr->IsOriginHostUntrusted() && HasIp6InIpTunnel(*aMessagePtr, header.GetNextHeader()))
+    {
+        LogInfo("Dropping host-untrusted IP-in-IP packet");
+        ExitNow(error = kErrorDrop);
+    }
+
 #if OPENTHREAD_CONFIG_BACKBONE_ROUTER_ENABLE
     // The filtering rules don't apply to packets from DUA.
     if (!Get<BackboneRouter::Leader>().IsDomainUnicast(header.GetSource()))
@@ -1219,10 +1280,12 @@ exit:
     return;
 }
 
-Error Ip6::HandleDatagram(OwnedPtr<Message> aMessagePtr, bool aIsReassembled)
+Error Ip6::HandleDatagram(OwnedPtr<Message> aMessagePtr, bool aIsReassembled, uint8_t aRecursionDepth)
 {
-    Error   error;
-    Header  header;
+    Error  error;
+    Header header;
+
+    VerifyOrExit(aRecursionDepth <= kMaxRecursionDepth, error = kErrorDrop);
     bool    receive;
     bool    forwardThread;
     bool    forwardHost;
@@ -1261,7 +1324,7 @@ Error Ip6::HandleDatagram(OwnedPtr<Message> aMessagePtr, bool aIsReassembled)
 
         Get<MeshForwarder>().LogMessage(MeshForwarder::kMessageReceive, *messagePtr);
 
-        IgnoreError(HandleDatagram(messagePtr.PassOwnership(), aIsReassembled));
+        SuccessOrExit(error = HandleDatagram(messagePtr.PassOwnership(), aIsReassembled, aRecursionDepth + 1));
 
         receive     = false;
         forwardHost = false;

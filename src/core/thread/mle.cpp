@@ -80,18 +80,9 @@ Mle::Mle(Instance &aInstance)
     , mWedAttachTimer(aInstance)
 #endif
 #if OPENTHREAD_FTD
-    , mRouterEligible(true)
-    , mRouterRoleAllowed(true)
-    , mBlockDowngrade(false)
     , mAddressSolicitPending(false)
     , mAddressSolicitRejected(false)
-#if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
-    , mCcmEnabled(false)
-    , mThreadVersionCheckEnabled(true)
-#endif
     , mNetworkIdTimeout(kNetworkIdTimeout)
-    , mRouterUpgradeThreshold(kRouterUpgradeThreshold)
-    , mRouterDowngradeThreshold(kRouterDowngradeThreshold)
     , mPreviousPartitionRouterIdSequence(0)
     , mPreviousPartitionIdTimeout(0)
     , mChildRouterLinks(kChildRouterLinks)
@@ -108,6 +99,7 @@ Mle::Mle(Instance &aInstance)
     , mAdvertiseTrickleTimer(aInstance, Mle::HandleAdvertiseTrickleTimer)
     , mChildTable(aInstance)
     , mRouterTable(aInstance)
+    , mRoleTransitioner(aInstance)
 #endif // OPENTHREAD_FTD
 #if OPENTHREAD_CONFIG_P2P_ENABLE
     , mP2p(aInstance)
@@ -455,7 +447,7 @@ void Mle::Restore(void)
     mHasRestored = true;
 
 #if OPENTHREAD_FTD
-    UpdateRouterRoleAllowed(kReasonMleInit);
+    mRoleTransitioner.UpdateRouterRoleAllowed(RoleTransitioner::kReasonMleInit);
 #endif
 
 exit:
@@ -606,7 +598,7 @@ void Mle::SetStateDetached(void)
     Get<MeshForwarder>().SetRxOnWhenIdle(true);
     Get<Mac::Mac>().SetBeaconEnabled(false);
 #if OPENTHREAD_FTD
-    mBlockDowngrade = false;
+    mRoleTransitioner.SetDowngradeBlocked(false);
     ClearAlternateRloc16();
     HandleDetachStart();
 #endif
@@ -727,7 +719,7 @@ Error Mle::SetDeviceMode(DeviceMode aDeviceMode)
         ClearAlternateRloc16();
     }
 
-    UpdateRouterRoleAllowed(kReasonDeviceModeChanged);
+    mRoleTransitioner.UpdateRouterRoleAllowed(RoleTransitioner::kReasonDeviceModeChanged);
 #endif
 
     if (IsAttached())
@@ -1052,21 +1044,23 @@ void Mle::HandleNotifierEvents(Events aEvents)
 #if OPENTHREAD_FTD
     if (aEvents.Contains(kEventSecurityPolicyChanged))
     {
-        UpdateRouterRoleAllowed(kReasonSecurityPolicyChanged);
+        mRoleTransitioner.UpdateRouterRoleAllowed(RoleTransitioner::kReasonSecurityPolicyChanged);
     }
 
-    if (mBlockDowngrade && aEvents.Contains(kEventThreadChildRemoved))
+    if (mRoleTransitioner.IsDowngradeBlocked() && aEvents.Contains(kEventThreadChildRemoved))
     {
-        mBlockDowngrade = false;
+        bool shouldBlock = false;
 
         for (const Child &child : Get<ChildTable>().Iterate(Child::kInStateValid))
         {
             if (child.IsBlockingParentDowngrade())
             {
-                mBlockDowngrade = true;
+                shouldBlock = true;
                 break;
             }
         }
+
+        mRoleTransitioner.SetDowngradeBlocked(shouldBlock);
     }
 #endif
 
@@ -3300,7 +3294,14 @@ void Mle::DelayedSender::ScheduleDiscoveryResponse(const Ip6::Address          &
                                                    const DiscoveryResponseInfo &aInfo,
                                                    uint32_t                     aDelay)
 {
+    RemoveMatchingSchedules(kTypeDiscoveryResponse, aDestination);
+
+    VerifyOrExit(CountMatchingSchedules(kTypeDiscoveryResponse) < kMaxScheduledDiscoveryResponse);
+
     AddSchedule(kTypeDiscoveryResponse, aDestination, aDelay, &aInfo, sizeof(aInfo));
+
+exit:
+    return;
 }
 
 #endif // OPENTHREAD_FTD
@@ -3496,6 +3497,24 @@ void Mle::DelayedSender::RemoveMatchingSchedules(MessageType aMessageType, const
     }
 }
 
+uint32_t Mle::DelayedSender::CountMatchingSchedules(MessageType aMessageType) const
+{
+    uint32_t     count = 0;
+    Ip6::Address unspecifiedAddr;
+
+    unspecifiedAddr.Clear();
+
+    for (const Schedule &schedule : mSchedules)
+    {
+        if (Match(schedule, aMessageType, unspecifiedAddr))
+        {
+            count++;
+        }
+    }
+
+    return count;
+}
+
 #if OT_SHOULD_LOG_AT(OT_LOG_LEVEL_INFO)
 void Mle::DelayedSender::LogRemove(const Schedule &aSchedule)
 {
@@ -3645,7 +3664,6 @@ Error Mle::TxMessage::AppendAddressRegistrationTlv(AddressRegistrationMode aMode
 {
     Error         error = kErrorNone;
     Tlv::Bookmark tlvBookmark;
-    uint8_t       counter = 0;
 
     SuccessOrExit(error = Tlv::StartTlv(*this, Tlv::kAddressRegistration, tlvBookmark));
 
@@ -3654,14 +3672,12 @@ Error Mle::TxMessage::AppendAddressRegistrationTlv(AddressRegistrationMode aMode
 
     // Continue to append the other addresses if not `kAppendMeshLocalOnly` mode
     VerifyOrExit(aMode != kAppendMeshLocalOnly);
-    counter++;
 
 #if OPENTHREAD_CONFIG_DUA_ENABLE
     if (Get<ThreadNetif>().HasUnicastAddress(Get<DuaManager>().GetDomainUnicastAddress()))
     {
         // Prioritize DUA, compressed entry
         SuccessOrExit(error = AppendAddressRegistrationEntry(Get<DuaManager>().GetDomainUnicastAddress()));
-        counter++;
     }
 #endif
 
@@ -3685,9 +3701,6 @@ Error Mle::TxMessage::AppendAddressRegistrationTlv(AddressRegistrationMode aMode
 #endif
 
         SuccessOrExit(error = AppendAddressRegistrationEntry(addr.GetAddress()));
-        counter++;
-        // only continue to append if there is available entry.
-        VerifyOrExit(counter < kMaxIpAddressesToRegister);
     }
 
     // Append external multicast addresses.  For sleepy end device,
@@ -3715,9 +3728,6 @@ Error Mle::TxMessage::AppendAddressRegistrationTlv(AddressRegistrationMode aMode
 #endif
 
             SuccessOrExit(error = AppendAddressRegistrationEntry(addr.GetAddress()));
-            counter++;
-            // only continue to append if there is available entry.
-            VerifyOrExit(counter < kMaxIpAddressesToRegister);
         }
     }
 
@@ -3966,14 +3976,13 @@ exit:
     return error;
 }
 
-Error Mle::TxMessage::AppendRouteTlv(Neighbor *aNeighbor)
+Error Mle::TxMessage::AppendRouteTlv(void) { return AppendFullOrCompactRouteTlv(kInvalidRloc16); }
+
+Error Mle::TxMessage::AppendCompactRouteTlv(uint16_t aDestRloc16) { return AppendFullOrCompactRouteTlv(aDestRloc16); }
+
+Error Mle::TxMessage::AppendFullOrCompactRouteTlv(uint16_t aDestRloc16)
 {
-    RouteTlv tlv;
-
-    tlv.Init();
-    Get<RouterTable>().FillRouteTlv(tlv, aNeighbor);
-
-    return tlv.AppendTo(*this);
+    return Get<RouterTable>().AppendRouteTlv(*this, RouteTlv::kType, aDestRloc16);
 }
 
 Error Mle::TxMessage::AppendActiveDatasetTlv(void) { return AppendDatasetTlv(MeshCoP::Dataset::kActive); }

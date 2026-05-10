@@ -229,8 +229,6 @@ typedef UintTlvInfo<Tlv::kCslTimeout, uint32_t> CslTimeoutTlv;
  */
 typedef UintTlvInfo<Tlv::kXtalAccuracy, uint16_t> XtalAccuracyTlv;
 
-#if !OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
-
 /**
  * Implements Route TLV generation and parsing.
  */
@@ -295,14 +293,14 @@ public:
      *
      * @returns The Route Data Entry Count.
      */
-    uint8_t GetRouteDataEntryCount(void) const { return GetLength() - sizeof(mRouterIdMask); }
-
-    /**
-     * Sets the Route Data entry count.
-     *
-     * @param[in]  aCount  The number of Route Data entries in the Route TLV.
-     */
-    void SetRouteDataEntryCount(uint8_t aCount) { SetLength(sizeof(mRouterIdMask) + aCount); }
+    uint8_t GetRouteDataEntryCount(void) const
+    {
+#if !OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
+        return GetLength() - sizeof(mRouterIdMask);
+#else
+        return (GetLength() - sizeof(mRouterIdMask)) * 2 / 3;
+#endif
+    }
 
     /**
      * Returns the Route Cost value for a given Router index.
@@ -313,7 +311,11 @@ public:
      */
     uint8_t GetRouteCost(uint8_t aRouterIndex) const
     {
+#if !OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
         return ReadBits<uint8_t, kRouteCostMask>(mRouteData[aRouterIndex]);
+#else
+        return static_cast<uint8_t>(ReadBits<uint16_t, kRouteCostMask>(ReadEntry(aRouterIndex)));
+#endif
     }
 
     /**
@@ -325,7 +327,11 @@ public:
      */
     LinkQuality GetLinkQualityIn(uint8_t aRouterIndex) const
     {
+#if !OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
         return static_cast<LinkQuality>(ReadBits<uint8_t, kLinkQualityInMask>(mRouteData[aRouterIndex]));
+#else
+        return static_cast<LinkQuality>(ReadBits<uint16_t, kLinkQualityInMask>(ReadEntry(aRouterIndex)));
+#endif
     }
 
     /**
@@ -337,186 +343,71 @@ public:
      */
     LinkQuality GetLinkQualityOut(uint8_t aRouterIndex) const
     {
+#if !OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
         return static_cast<LinkQuality>(ReadBits<uint8_t, kLinkQualityOutMask>(mRouteData[aRouterIndex]));
+#else
+        return static_cast<LinkQuality>(ReadBits<uint16_t, kLinkQualityOutMask>(ReadEntry(aRouterIndex)));
+#endif
     }
 
+#if !OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
     /**
-     * Sets the Route Data (Link Quality In/Out and Route Cost) for a given Router index.
+     * Appends a Route Data entry (Link Quality In/Out and Route Cost) to a message.
      *
-     * @param[in]  aRouterIndex    The Router index.
-     * @param[in]  aLinkQualityIn  The Link Quality In value.
-     * @param[in]  aLinkQualityOut The Link Quality Out value.
+     * @param[in]  aMessage        The message to append to.
+     * @param[in]  aLqIn           The Link Quality In value.
+     * @param[in]  aLqOut          The Link Quality Out value.
      * @param[in]  aRouteCost      The Route Cost value.
+     *
+     * @retval kErrorNone      Successfully appended the data.
+     * @retval kErrorNoBufs    Insufficient available buffers to grow the message.
      */
-    void SetRouteData(uint8_t aRouterIndex, LinkQuality aLinkQualityIn, LinkQuality aLinkQualityOut, uint8_t aRouteCost)
-    {
-        mRouteData[aRouterIndex] = 0;
-
-        WriteBits<uint8_t, kLinkQualityInMask>(mRouteData[aRouterIndex], aLinkQualityIn);
-        WriteBits<uint8_t, kLinkQualityOutMask>(mRouteData[aRouterIndex], aLinkQualityOut);
-        WriteBits<uint8_t, kRouteCostMask>(mRouteData[aRouterIndex], aRouteCost);
-    }
+    static Error AppendRouteDataEntry(Message &aMessage, LinkQuality aLqIn, LinkQuality aLqOut, uint8_t aRouteCost);
+#else
+    /**
+     * Appends a Route Data entry (Link Quality In/Out and Route Cost) to a message.
+     *
+     * Under `OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE`, each route data entry uses 1.5 bytes (12 bits). Two entries
+     * are packed into 3 bytes. @p aIsEven is used to indicate whether this is an even (first) or an odd (second) entry.
+     *
+     * @param[in]  aMessage        The message to append to.
+     * @param[in]  aLqIn           The Link Quality In value.
+     * @param[in]  aLqOut          The Link Quality Out value.
+     * @param[in]  aRouteCost      The Route Cost value.
+     * @param[in]  aIsEven         Indicates whether this is an even (first) entry.
+     *
+     * @retval kErrorNone      Successfully appended the data.
+     * @retval kErrorNoBufs    Insufficient available buffers to grow the message.
+     * @retval kErrorParse     Message length is invalid for parsing route data.
+     */
+    static Error AppendRouteDataEntry(Message    &aMessage,
+                                      LinkQuality aLqIn,
+                                      LinkQuality aLqOut,
+                                      uint8_t     aRouteCost,
+                                      bool        aIsEven);
+#endif
 
 private:
+#if !OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
     //   7   6   5   4   3   2   1   0
     // +---+---+---+---+---+---+---+---+
     // | LQOut | LQIn  |  Route Cost   |
     // +---+---+---+---+---+---+---+---+
 
+    typedef uint8_t EntryType;
+
     static constexpr uint8_t kLinkQualityOutMask = 0x03 << 6;
     static constexpr uint8_t kLinkQualityInMask  = 0x03 << 4;
     static constexpr uint8_t kRouteCostMask      = 0x0f << 0;
 
-    RouterIdMask mRouterIdMask;
-    uint8_t      mRouteData[kMaxRouterId + 1];
-} OT_TOOL_PACKED_END;
-
-#else // OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
-
-/**
- * Implements Route TLV generation and parsing.
- */
-OT_TOOL_PACKED_BEGIN
-class RouteTlv : public Tlv, public TlvInfo<Tlv::kRoute>
-{
-public:
-    /**
-     * Initializes the TLV.
-     */
-    void Init(void)
-    {
-        SetType(kRoute);
-        SetLength(sizeof(*this) - sizeof(Tlv));
-    }
-
-    /**
-     * Indicates whether or not the TLV appears to be well-formed.
-     *
-     * @retval TRUE   If the TLV appears to be well-formed.
-     * @retval FALSE  If the TLV does not appear to be well-formed.
-     */
-    bool IsValid(void) const { return GetLength() >= sizeof(RouterIdMask); }
-
-    /**
-     * Returns the Router ID Sequence value.
-     *
-     * @returns The Router ID Sequence value.
-     */
-    uint8_t GetRouterIdSequence(void) const { return mRouterIdMask.GetSequence(); }
-
-    /**
-     * Gets the Router ID Mask.
-     *
-     * @returns The Router ID Mask.
-     */
-    const RouterIdMask &GetRouterIdMask(void) const { return mRouterIdMask; }
-
-    /**
-     * Gets the Router ID Mask.
-     *
-     * @returns The Router ID Mask.
-     */
-    RouterIdMask &GetRouterIdMask(void) { return mRouterIdMask; }
-
-    /**
-     * Indicates whether or not a Router ID bit is set.
-     *
-     * @param[in]  aRouterId  The Router ID.
-     *
-     * @retval TRUE   If the Router ID bit is set.
-     * @retval FALSE  If the Router ID bit is not set.
-     */
-    bool IsRouterIdSet(uint8_t aRouterId) const { return mRouterIdMask.IsAllocated(aRouterId); }
-
-    /**
-     * Indicates whether the `RouteTlv` is a singleton, i.e., only one router is allocated.
-     *
-     * @retval TRUE   It is a singleton.
-     * @retval FALSE  It is not a singleton.
-     */
-    bool IsSingleton(void) const { return IsValid() && (mRouterIdMask.DetermineAllocatedCount() <= 1); }
-
-    /**
-     * Sets the Router ID bit.
-     *
-     * @param[in]  aRouterId  The Router ID bit to set.
-     */
-    void SetRouterId(uint8_t aRouterId) { mRouterIdMask.Add(aRouterId); }
-
-    /**
-     * Returns the number of Route Data entries in the Route TLV.
-     *
-     * @returns The Route Data Entry Count.
-     */
-    uint8_t GetRouteDataEntryCount(void) const { return (GetLength() - sizeof(mRouterIdMask)) * 2 / 3; }
-
-    /**
-     * Sets the Route Data entry count.
-     *
-     * @param[in]  aCount  The number of Route Data entries in the Route TLV.
-     */
-    void SetRouteDataEntryCount(uint8_t aCount) { SetLength(sizeof(mRouterIdMask) + aCount + (aCount + 1) / 2); }
-
-    /**
-     * Returns the Route Cost value for a given Router index.
-     *
-     * @param[in]  aRouterIndex  The Router index.
-     *
-     * @returns The Route Cost value for a given Router index.
-     */
-    uint8_t GetRouteCost(uint8_t aRouterIndex) const
-    {
-        return static_cast<uint8_t>(ReadBits<uint16_t, kRouteCostMask>(ReadEntry(aRouterIndex)));
-    }
-
-    /**
-     * Returns the Link Quality In value for a given Router index.
-     *
-     * @param[in]  aRouterIndex  The Router index.
-     *
-     * @returns The Link Quality In value for a given Router index.
-     */
-    LinkQuality GetLinkQualityIn(uint8_t aRouterIndex) const
-    {
-        return static_cast<LinkQuality>(ReadBits<uint16_t, kLinkQualityInMask>(ReadEntry(aRouterIndex)));
-    }
-
-    /**
-     * Returns the Link Quality Out value for a given Router index.
-     *
-     * @param[in]  aRouterIndex  The Router index.
-     *
-     * @returns The Link Quality Out value for a given Router index.
-     */
-    LinkQuality GetLinkQualityOut(uint8_t aRouterIndex) const
-    {
-        return static_cast<LinkQuality>(ReadBits<uint16_t, kLinkQualityOutMask>(ReadEntry(aRouterIndex)));
-    }
-
-    /**
-     * Sets the Route Data (Link Quality In/Out and Route Cost) for a given Router index.
-     *
-     * @param[in]  aRouterIndex    The Router index.
-     * @param[in]  aLinkQualityIn  The Link Quality In value.
-     * @param[in]  aLinkQualityOut The Link Quality Out value.
-     * @param[in]  aRouteCost      The Route Cost value.
-     */
-    void SetRouteData(uint8_t aRouterIndex, LinkQuality aLinkQualityIn, LinkQuality aLinkQualityOut, uint8_t aRouteCost)
-    {
-        uint16_t data = 0;
-
-        WriteBits<uint16_t, kLinkQualityOutMask>(data, aLinkQualityOut);
-        WriteBits<uint16_t, kLinkQualityInMask>(data, aLinkQualityIn);
-        WriteBits<uint16_t, kRouteCostMask>(data, aRouteCost);
-
-        WriteEntry(aRouterIndex, data);
-    }
-
-private:
+    static constexpr uint16_t kMaxRouteDataSize = kMaxRouterId + 1;
+#else
     // Under `LOG_ROUTES` feature, Route Data is 12 bits per route
     // (1.5 bytes). The first 4 bits are link qualities (out/in),
     // remaining 8 bits are for the route cost. The even and odd
     // entries are staggered.
+
+    typedef uint16_t EntryType;
 
     static constexpr uint16_t kEvenEntryMask = 0xfff << 4;
     static constexpr uint16_t kOddEntryMask  = 0xfff << 0;
@@ -524,6 +415,8 @@ private:
     static constexpr uint16_t kLinkQualityOutMask = 0x03 << 10;
     static constexpr uint16_t kLinkQualityInMask  = 0x03 << 8;
     static constexpr uint16_t kRouteCostMask      = 0xff << 0;
+
+    static constexpr uint16_t kMaxRouteDataSize = kMaxRouterId + 1 + kMaxRouterId / 2 + 1;
 
     uint16_t ReadEntry(uint8_t aRouterIndex) const
     {
@@ -541,31 +434,11 @@ private:
 
         return data;
     }
-
-    void WriteEntry(uint8_t aRouterIndex, uint16_t aData)
-    {
-        uint16_t offset = (aRouterIndex + aRouterIndex / 2);
-        uint16_t existing;
-
-        existing = BigEndian::ReadUint16(&mRouteData[offset]);
-
-        if (aRouterIndex & 0x1)
-        {
-            WriteBits<uint16_t, kOddEntryMask>(existing, aData);
-        }
-        else
-        {
-            WriteBits<uint16_t, kEvenEntryMask>(existing, aData);
-        }
-
-        BigEndian::WriteUint16(existing, &mRouteData[offset]);
-    }
+#endif // OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
 
     RouterIdMask mRouterIdMask;
-    uint8_t      mRouteData[kMaxRouterId + 1 + kMaxRouterId / 2 + 1];
+    uint8_t      mRouteData[kMaxRouteDataSize];
 } OT_TOOL_PACKED_END;
-
-#endif // OPENTHREAD_CONFIG_MLE_LONG_ROUTES_ENABLE
 
 /**
  * Represents Leader Data TLV value.

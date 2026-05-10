@@ -58,7 +58,7 @@ Manager::Manager(Instance &aInstance)
     , mDuaResponseStatus(kDuaSuccess)
 #endif
 #if OPENTHREAD_CONFIG_BACKBONE_ROUTER_MULTICAST_ROUTING_ENABLE
-    , mMlrResponseStatus(kMlrSuccess)
+    , mMlrResponseStatus(Mlr::kStatusSuccess)
 #endif
 #if OPENTHREAD_CONFIG_BACKBONE_ROUTER_DUA_NDPROXYING_ENABLE
     , mDuaResponseIsSpecified(false)
@@ -110,10 +110,6 @@ void Manager::HandleNotifierEvents(Events aEvents)
 
 void Manager::HandleTimer(void)
 {
-#if OPENTHREAD_CONFIG_BACKBONE_ROUTER_MULTICAST_ROUTING_ENABLE
-    mMulticastListenersTable.Expire();
-#endif
-
 #if OPENTHREAD_CONFIG_BACKBONE_ROUTER_DUA_NDPROXYING_ENABLE
     mNdProxyTable.HandleTimer();
 #endif
@@ -133,14 +129,14 @@ exit:
 
 void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
 {
-    Error     error     = kErrorNone;
-    bool      isPrimary = Get<Local>().IsPrimary();
-    MlrStatus status    = kMlrSuccess;
-    Config    config;
+    Error       error     = kErrorNone;
+    bool        isPrimary = Get<Local>().IsPrimary();
+    Mlr::Status status    = Mlr::kStatusSuccess;
+    Config      config;
 
     OffsetRange  offsetRange;
     Ip6::Address address;
-    Ip6::Address addresses[Ip6AddressesTlv::kMaxAddresses];
+    Ip6::Address addresses[Mlr::kMaxIp6Addresses];
     uint8_t      failedAddressNum  = 0;
     uint8_t      successAddressNum = 0;
     TimeMilli    expireTime;
@@ -151,13 +147,13 @@ void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
 
     VerifyOrExit(aMsg.IsConfirmable(), error = kErrorParse);
 
-    VerifyOrExit(isPrimary, status = kMlrBbrNotPrimary);
+    VerifyOrExit(isPrimary, status = Mlr::kStatusBbrNotPrimary);
 
     VerifyOrExit(Tlv::FindTlvValueOffsetRange(aMsg.mMessage, Ip6AddressesTlv::kType, offsetRange) == kErrorNone,
                  error = kErrorParse);
-    VerifyOrExit(offsetRange.GetLength() % sizeof(Ip6::Address) == 0, status = kMlrGeneralFailure);
-    VerifyOrExit(offsetRange.GetLength() / sizeof(Ip6::Address) <= Ip6AddressesTlv::kMaxAddresses,
-                 status = kMlrGeneralFailure);
+    VerifyOrExit(offsetRange.GetLength() % sizeof(Ip6::Address) == 0, status = Mlr::kStatusGeneralFailure);
+    VerifyOrExit(offsetRange.GetLength() / sizeof(Ip6::Address) <= Mlr::kMaxIp6Addresses,
+                 status = Mlr::kStatusGeneralFailure);
 
 #if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
     // Required by Test Specification 5.10.22 MATN-TC-26, only for certification purpose
@@ -166,7 +162,7 @@ void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
         mMlrResponseIsSpecified = false;
         status                  = mMlrResponseStatus;
 
-        if (status != kMlrSuccess)
+        if (status != Mlr::kStatusSuccess)
         {
             while (!offsetRange.IsEmpty())
             {
@@ -186,7 +182,7 @@ void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
 
         VerifyOrExit((Get<NetworkData::Leader>().FindCommissioningSessionId(localSessionId) == kErrorNone) &&
                          (localSessionId == commissionerSessionId),
-                     status = kMlrGeneralFailure);
+                     status = Mlr::kStatusGeneralFailure);
 
         hasCommissionerSessionIdTlv = true;
     }
@@ -202,7 +198,7 @@ void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
     }
     else
     {
-        VerifyOrExit(timeout < NumericLimits<uint32_t>::kMax, status = kMlrNoPersistent);
+        VerifyOrExit(timeout < NumericLimits<uint32_t>::kMax, status = Mlr::kStatusNoPersistent);
 
         if (timeout != 0)
         {
@@ -229,7 +225,7 @@ void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
             mMulticastListenersTable.Remove(address);
 
             // Put successfully de-registered addresses at the end of `addresses`.
-            addresses[Ip6AddressesTlv::kMaxAddresses - (++successAddressNum)] = address;
+            addresses[Mlr::kMaxIp6Addresses - (++successAddressNum)] = address;
         }
         else
         {
@@ -241,15 +237,15 @@ void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
                 failed = false;
                 break;
             case kErrorInvalidArgs:
-                if (status == kMlrSuccess)
+                if (status == Mlr::kStatusSuccess)
                 {
-                    status = kMlrInvalid;
+                    status = Mlr::kStatusInvalid;
                 }
                 break;
             case kErrorNoBufs:
-                if (status == kMlrSuccess)
+                if (status == Mlr::kStatusSuccess)
                 {
-                    status = kMlrNoResources;
+                    status = Mlr::kStatusNoResources;
                 }
                 break;
             default:
@@ -263,7 +259,7 @@ void Manager::HandleMulticastListenerRegistration(const Coap::Msg &aMsg)
             else
             {
                 // Put successfully registered addresses at the end of `addresses`.
-                addresses[Ip6AddressesTlv::kMaxAddresses - (++successAddressNum)] = address;
+                addresses[Mlr::kMaxIp6Addresses - (++successAddressNum)] = address;
             }
         }
     }
@@ -276,13 +272,13 @@ exit:
 
     if (successAddressNum > 0)
     {
-        SendBackboneMulticastListenerRegistration(&addresses[Ip6AddressesTlv::kMaxAddresses - successAddressNum],
+        SendBackboneMulticastListenerRegistration(&addresses[Mlr::kMaxIp6Addresses - successAddressNum],
                                                   successAddressNum, timeout);
     }
 }
 
 void Manager::SendMulticastListenerRegistrationResponse(const Coap::Msg &aMsg,
-                                                        MlrStatus        aStatus,
+                                                        Mlr::Status      aStatus,
                                                         Ip6::Address    *aFailedAddresses,
                                                         uint8_t          aFailedAddressNum)
 {
@@ -296,16 +292,7 @@ void Manager::SendMulticastListenerRegistrationResponse(const Coap::Msg &aMsg,
 
     if (aFailedAddressNum > 0)
     {
-        Tlv::Bookmark tlvBookmark;
-
-        SuccessOrExit(error = Tlv::StartTlv(*message, Ip6AddressesTlv::kType, tlvBookmark));
-
-        for (uint8_t i = 0; i < aFailedAddressNum; i++)
-        {
-            SuccessOrExit(error = message->Append(aFailedAddresses[i]));
-        }
-
-        SuccessOrExit(error = Tlv::EndTlv(*message, tlvBookmark));
+        SuccessOrExit(error = Ip6AddressesTlv::AppendTo(*message, aFailedAddresses, aFailedAddressNum));
     }
 
     SuccessOrExit(error = Get<Tmf::Agent>().SendMessage(*message, aMsg.mMessageInfo));
@@ -322,17 +309,14 @@ void Manager::SendBackboneMulticastListenerRegistration(const Ip6::Address *aAdd
     Error             error   = kErrorNone;
     Coap::Message    *message = nullptr;
     Ip6::MessageInfo  messageInfo;
-    Tlv::Bookmark     tlvBookmark;
     BackboneTmfAgent &backboneTmf = Get<BackboneRouter::BackboneTmfAgent>();
 
-    OT_ASSERT(aAddressNum >= Ip6AddressesTlv::kMinAddresses && aAddressNum <= Ip6AddressesTlv::kMaxAddresses);
+    OT_ASSERT(aAddressNum >= Mlr::kMinIp6Addresses && aAddressNum <= Mlr::kMaxIp6Addresses);
 
     message = backboneTmf.AllocateAndInitNonConfirmablePostMessage(kUriBackboneMlr);
     VerifyOrExit(message != nullptr, error = kErrorNoBufs);
 
-    SuccessOrExit(error = Tlv::StartTlv(*message, Ip6AddressesTlv::kType, tlvBookmark));
-    SuccessOrExit(error = message->AppendBytes(aAddresses, sizeof(Ip6::Address) * aAddressNum));
-    SuccessOrExit(error = Tlv::EndTlv(*message, tlvBookmark));
+    SuccessOrExit(error = Ip6AddressesTlv::AppendTo(*message, aAddresses, aAddressNum));
 
     SuccessOrExit(error = Tlv::Append<ThreadTimeoutTlv>(*message, aTimeout));
 
@@ -478,7 +462,7 @@ void Manager::ConfigNextDuaRegistrationResponse(const Ip6::InterfaceIdentifier *
 #endif
 
 #if OPENTHREAD_CONFIG_BACKBONE_ROUTER_MULTICAST_ROUTING_ENABLE
-void Manager::ConfigNextMulticastListenerRegistrationResponse(MlrStatus aStatus)
+void Manager::ConfigNextMulticastListenerRegistrationResponse(Mlr::Status aStatus)
 {
     mMlrResponseIsSpecified = true;
     mMlrResponseStatus      = aStatus;

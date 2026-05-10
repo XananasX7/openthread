@@ -38,21 +38,22 @@
 #include "instance/instance.hpp"
 
 namespace ot {
+namespace Mlr {
 
 RegisterLogModule("MlrManager");
 
-MlrManager::MlrManager(Instance &aInstance)
+Manager::Manager(Instance &aInstance)
     : InstanceLocator(aInstance)
     , mReregistrationDelay(0)
     , mSendDelay(0)
-    , mMlrPending(false)
+    , mPending(false)
 #if OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE && OPENTHREAD_CONFIG_COMMISSIONER_ENABLE
     , mRegisterPending(false)
 #endif
 {
 }
 
-void MlrManager::HandleNotifierEvents(Events aEvents)
+void Manager::HandleNotifierEvents(Events aEvents)
 {
 #if OPENTHREAD_CONFIG_MLR_ENABLE
     if (aEvents.Contains(kEventIp6MulticastSubscribed))
@@ -63,41 +64,48 @@ void MlrManager::HandleNotifierEvents(Events aEvents)
 
     if (aEvents.Contains(kEventThreadRoleChanged) && Get<Mle::Mle>().IsChild())
     {
-        // Reregistration after re-attach
-        UpdateReregistrationDelay(true);
+        ScheduleNextRegistration(kReregister);
     }
 }
 
-void MlrManager::HandleBackboneRouterPrimaryUpdate(BackboneRouter::Leader::State aState,
-                                                   const BackboneRouter::Config &aConfig)
+void Manager::HandleBackboneRouterPrimaryUpdate(BackboneRouter::Leader::State aState,
+                                                const BackboneRouter::Config &aConfig)
 {
     OT_UNUSED_VARIABLE(aConfig);
 
-    bool needRereg =
-        aState == BackboneRouter::Leader::kStateAdded || aState == BackboneRouter::Leader::kStateToTriggerRereg;
+    RegistrationRequest request = kRenew;
 
-    UpdateReregistrationDelay(needRereg);
+    switch (aState)
+    {
+    case BackboneRouter::Leader::kStateAdded:
+    case BackboneRouter::Leader::kStateToTriggerRereg:
+        request = kReregister;
+        break;
+    default:
+        break;
+    }
+
+    ScheduleNextRegistration(request);
 }
 
 #if OPENTHREAD_CONFIG_MLR_ENABLE
-void MlrManager::UpdateLocalSubscriptions(void)
+void Manager::UpdateLocalSubscriptions(void)
 {
 #if OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
     // Check multicast addresses are newly listened against Children
     for (Ip6::Netif::MulticastAddress &addr : Get<ThreadNetif>().GetMulticastAddresses())
     {
-        if (addr.Matches(kMlrStateToRegister) && IsAddressMlrRegisteredByAnyChild(addr.GetAddress()))
+        if (addr.Matches(kStateToRegister) && IsAddressRegisteredByAnyChild(addr.GetAddress()))
         {
-            addr.SetMlrState(kMlrStateRegistered);
+            addr.SetMlrState(kStateRegistered);
         }
     }
 #endif
 
-    CheckInvariants();
     ScheduleSend(0);
 }
 
-bool MlrManager::IsAddressMlrRegisteredByNetif(const Ip6::Address &aAddress) const
+bool Manager::IsAddressRegisteredByNetif(const Ip6::Address &aAddress) const
 {
     bool ret = false;
 
@@ -105,7 +113,7 @@ bool MlrManager::IsAddressMlrRegisteredByNetif(const Ip6::Address &aAddress) con
 
     for (const Ip6::Netif::MulticastAddress &addr : Get<ThreadNetif>().GetMulticastAddresses())
     {
-        if (addr.Matches(kMlrStateRegistered) && (addr.GetAddress() == aAddress))
+        if (addr.Matches(kStateRegistered) && (addr.GetAddress() == aAddress))
         {
             ret = true;
             break;
@@ -119,7 +127,7 @@ bool MlrManager::IsAddressMlrRegisteredByNetif(const Ip6::Address &aAddress) con
 
 #if OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
 
-bool MlrManager::IsAddressMlrRegisteredByAnyChildExcept(const Ip6::Address &aAddress, const Child *aExceptChild) const
+bool Manager::IsAddressRegisteredByAnyChildExcept(const Ip6::Address &aAddress, const Child *aExceptChild) const
 {
     bool ret = false;
 
@@ -137,35 +145,34 @@ exit:
     return ret;
 }
 
-void MlrManager::UpdateProxiedSubscriptions(Child &aChild, const MlrAddressArray &aOldMlrRegisteredAddresses)
+void Manager::UpdateProxiedSubscriptions(Child &aChild, const ChildAddressArray &aOldRegisteredAddresses)
 {
     VerifyOrExit(aChild.IsStateValid());
 
     // Search the new multicast addresses and set its flag accordingly
     for (Child::Ip6AddrEntry &addrEntry : aChild.GetIp6Addresses())
     {
-        bool isMlrRegistered;
+        bool isRegistered;
 
         if (!addrEntry.IsMulticastLargerThanRealmLocal())
         {
             continue;
         }
 
-        isMlrRegistered = aOldMlrRegisteredAddresses.Contains(addrEntry);
+        isRegistered = aOldRegisteredAddresses.Contains(addrEntry);
 
 #if OPENTHREAD_CONFIG_MLR_ENABLE
         // Check if it's a new multicast address against parent Netif
-        isMlrRegistered = isMlrRegistered || IsAddressMlrRegisteredByNetif(addrEntry);
+        isRegistered = isRegistered || IsAddressRegisteredByNetif(addrEntry);
 #endif
         // Check if it's a new multicast address against other Children
-        isMlrRegistered = isMlrRegistered || IsAddressMlrRegisteredByAnyChildExcept(addrEntry, &aChild);
+        isRegistered = isRegistered || IsAddressRegisteredByAnyChildExcept(addrEntry, &aChild);
 
-        addrEntry.SetMlrState(isMlrRegistered ? kMlrStateRegistered : kMlrStateToRegister, aChild);
+        addrEntry.SetMlrState(isRegistered ? kStateRegistered : kStateToRegister, aChild);
     }
 
 exit:
     LogMulticastAddresses();
-    CheckInvariants();
 
     if (aChild.HasAnyMlrToRegisterAddress())
     {
@@ -175,16 +182,16 @@ exit:
 
 #endif // OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
 
-void MlrManager::ScheduleSend(uint16_t aDelay)
+void Manager::ScheduleSend(uint16_t aDelay)
 {
-    OT_ASSERT(!mMlrPending || mSendDelay == 0);
+    OT_ASSERT(!mPending || mSendDelay == 0);
 
-    VerifyOrExit(!mMlrPending);
+    VerifyOrExit(!mPending);
 
     if (aDelay == 0)
     {
         mSendDelay = 0;
-        SendMlr();
+        Send();
     }
     else if (mSendDelay == 0 || mSendDelay > aDelay)
     {
@@ -196,7 +203,7 @@ exit:
     return;
 }
 
-void MlrManager::UpdateTimeTickerRegistration(void)
+void Manager::UpdateTimeTickerRegistration(void)
 {
     if (mSendDelay == 0 && mReregistrationDelay == 0)
     {
@@ -208,16 +215,28 @@ void MlrManager::UpdateTimeTickerRegistration(void)
     }
 }
 
-void MlrManager::SendMlr(void)
+bool Manager::ShouldRegister(void) const
+{
+    bool shouldRegister = false;
+
+    VerifyOrExit(Get<Mle::Mle>().IsFullThreadDevice() || Get<Mle::Mle>().GetParent().IsThreadVersion1p1());
+    VerifyOrExit(Get<BackboneRouter::Leader>().HasPrimary());
+
+    shouldRegister = true;
+
+exit:
+    return shouldRegister;
+}
+
+void Manager::Send(void)
 {
     Error        error;
     AddressArray addresses;
 
-    VerifyOrExit(!mMlrPending, error = kErrorBusy);
+    VerifyOrExit(!mPending, error = kErrorBusy);
+
     VerifyOrExit(Get<Mle::Mle>().IsAttached(), error = kErrorInvalidState);
-    VerifyOrExit(Get<Mle::Mle>().IsFullThreadDevice() || Get<Mle::Mle>().GetParent().IsThreadVersion1p1(),
-                 error = kErrorInvalidState);
-    VerifyOrExit(Get<BackboneRouter::Leader>().HasPrimary(), error = kErrorInvalidState);
+    VerifyOrExit(ShouldRegister(), error = kErrorInvalidState);
 
 #if OPENTHREAD_CONFIG_MLR_ENABLE
     // Append Netif multicast addresses
@@ -228,10 +247,10 @@ void MlrManager::SendMlr(void)
             break;
         }
 
-        if (addr.Matches(kMlrStateToRegister))
+        if (addr.Matches(kStateToRegister))
         {
-            addresses.AddUnique(addr.GetAddress());
-            addr.SetMlrState(kMlrStateRegistering);
+            IgnoreError(addresses.AddUnique(addr.GetAddress()));
+            addr.SetMlrState(kStateRegistering);
         }
     }
 #endif
@@ -262,20 +281,19 @@ void MlrManager::SendMlr(void)
                 break;
             }
 
-            if (addrEntry.GetMlrState(child) == kMlrStateToRegister)
+            if (addrEntry.GetMlrState(child) == kStateToRegister)
             {
-                addresses.AddUnique(addrEntry);
-                addrEntry.SetMlrState(kMlrStateRegistering, child);
+                IgnoreError(addresses.AddUnique(addrEntry));
+                addrEntry.SetMlrState(kStateRegistering, child);
             }
         }
     }
 #endif
 
     VerifyOrExit(!addresses.IsEmpty(), error = kErrorNotFound);
-    SuccessOrExit(
-        error = SendMlrMessage(addresses.GetArrayBuffer(), addresses.GetLength(), nullptr, HandleMlrResponse, this));
+    SuccessOrExit(error = SendMessage(addresses.GetArrayBuffer(), addresses.GetLength(), nullptr, HandleResponse));
 
-    mMlrPending = true;
+    mPending = true;
 
     // Generally Thread 1.2 Router would send MLR.req on behalf for MA (scope >=4) subscribed by its MTD child.
     // When Thread 1.2 MTD attaches to Thread 1.1 parent, 1.2 MTD should send MLR.req to PBBR itself.
@@ -288,7 +306,7 @@ void MlrManager::SendMlr(void)
 exit:
     if (error != kErrorNone)
     {
-        SetMulticastAddressMlrState(kMlrStateRegistering, kMlrStateToRegister);
+        SetMulticastAddressState(kStateRegistering, kStateToRegister);
 
         if (error == kErrorNoBufs)
         {
@@ -297,20 +315,19 @@ exit:
     }
 
     LogMulticastAddresses();
-    CheckInvariants();
 }
 
 #if OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE && OPENTHREAD_CONFIG_COMMISSIONER_ENABLE
-Error MlrManager::RegisterMulticastListeners(const Ip6::Address *aAddresses,
-                                             uint8_t             aAddressNum,
-                                             const uint32_t     *aTimeout,
-                                             MlrCallback         aCallback,
-                                             void               *aContext)
+Error Manager::RegisterMulticastListeners(const Ip6::Address *aAddresses,
+                                          uint8_t             aAddressNum,
+                                          const uint32_t     *aTimeout,
+                                          RegisterCallback    aCallback,
+                                          void               *aContext)
 {
     Error error;
 
     VerifyOrExit(aAddresses != nullptr, error = kErrorInvalidArgs);
-    VerifyOrExit(aAddressNum > 0 && aAddressNum <= Ip6AddressesTlv::kMaxAddresses, error = kErrorInvalidArgs);
+    VerifyOrExit(aAddressNum > 0 && aAddressNum <= kMaxIp6Addresses, error = kErrorInvalidArgs);
     VerifyOrExit(aContext == nullptr || aCallback != nullptr, error = kErrorInvalidArgs);
 #if !OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
     VerifyOrExit(Get<MeshCoP::Commissioner>().IsActive(), error = kErrorInvalidState);
@@ -324,7 +341,7 @@ Error MlrManager::RegisterMulticastListeners(const Ip6::Address *aAddresses,
     // Only allow one outstanding registration if callback is specified.
     VerifyOrExit(!mRegisterPending, error = kErrorBusy);
 
-    SuccessOrExit(error = SendMlrMessage(aAddresses, aAddressNum, aTimeout, HandleRegisterResponse, this));
+    SuccessOrExit(error = SendMessage(aAddresses, aAddressNum, aTimeout, HandleRegisterResponse));
 
     mRegisterPending = true;
     mRegisterCallback.Set(aCallback, aContext);
@@ -333,7 +350,7 @@ exit:
     return error;
 }
 
-void MlrManager::HandleRegisterResponse(Coap::Msg *aMsg, Error aResult)
+void Manager::HandleRegisterResponse(Coap::Msg *aMsg, Error aResult)
 {
     uint8_t      status;
     Error        error;
@@ -341,34 +358,30 @@ void MlrManager::HandleRegisterResponse(Coap::Msg *aMsg, Error aResult)
 
     mRegisterPending = false;
 
-    error = ParseMlrResponse(aResult, aMsg, status, failedAddresses);
+    error = ParseResponse(aResult, aMsg, status, failedAddresses);
 
     mRegisterCallback.InvokeAndClearIfSet(error, status, failedAddresses.GetArrayBuffer(), failedAddresses.GetLength());
 }
 
 #endif // OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE && OPENTHREAD_CONFIG_COMMISSIONER_ENABLE
 
-Error MlrManager::SendMlrMessage(const Ip6::Address         *aAddresses,
-                                 uint8_t                     aAddressNum,
-                                 const uint32_t             *aTimeout,
-                                 const Coap::ResponseHandler aResponseHandler,
-                                 void                       *aContext)
+Error Manager::SendMessage(const Ip6::Address         *aAddresses,
+                           uint8_t                     aAddressNum,
+                           const uint32_t             *aTimeout,
+                           const Coap::ResponseHandler aResponseHandler)
 {
     OT_UNUSED_VARIABLE(aTimeout);
 
     Error          error   = kErrorNone;
     Coap::Message *message = nullptr;
     Ip6::Address   destAddr;
-    Tlv::Bookmark  tlvBookmark;
 
     VerifyOrExit(Get<BackboneRouter::Leader>().HasPrimary(), error = kErrorInvalidState);
 
     message = Get<Tmf::Agent>().AllocateAndInitConfirmablePostMessage(kUriMlr);
     VerifyOrExit(message != nullptr, error = kErrorNoBufs);
 
-    SuccessOrExit(error = Tlv::StartTlv(*message, Ip6AddressesTlv::kType, tlvBookmark));
-    SuccessOrExit(error = message->AppendBytes(aAddresses, sizeof(Ip6::Address) * aAddressNum));
-    SuccessOrExit(error = Tlv::EndTlv(*message, tlvBookmark));
+    SuccessOrExit(error = Ip6AddressesTlv::AppendTo(*message, aAddresses, aAddressNum));
 
 #if OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE && OPENTHREAD_CONFIG_COMMISSIONER_ENABLE
     if (Get<MeshCoP::Commissioner>().IsActive())
@@ -397,27 +410,27 @@ Error MlrManager::SendMlrMessage(const Ip6::Address         *aAddresses,
         destAddr.SetToRoutingLocator(Get<Mle::Mle>().GetMeshLocalPrefix(), Get<BackboneRouter::Leader>().GetServer16());
     }
 
-    error = Get<Tmf::Agent>().SendMessageTo(*message, destAddr, aResponseHandler, aContext);
+    error = Get<Tmf::Agent>().SendMessageTo(*message, destAddr, aResponseHandler, this);
 
     LogInfo("Sent MLR.req: addressNum=%d", aAddressNum);
 
 exit:
-    LogInfoOnError(error, "SendMlrMessage()");
+    LogInfoOnError(error, "SendMessage()");
     FreeMessageOnError(message, error);
     return error;
 }
 
-void MlrManager::HandleMlrResponse(Coap::Msg *aMsg, Error aResult)
+void Manager::HandleResponse(Coap::Msg *aMsg, Error aResult)
 {
     uint8_t      status;
     Error        error;
     AddressArray failedAddresses;
 
-    error = ParseMlrResponse(aResult, aMsg, status, failedAddresses);
+    error = ParseResponse(aResult, aMsg, status, failedAddresses);
 
-    FinishMlr(error == kErrorNone && status == kMlrSuccess, failedAddresses);
+    Finish(error == kErrorNone && status == kStatusSuccess, failedAddresses);
 
-    if (error == kErrorNone && status == kMlrSuccess)
+    if (error == kErrorNone && status == kStatusSuccess)
     {
         // keep sending until all multicast addresses are registered.
         ScheduleSend(0);
@@ -425,54 +438,72 @@ void MlrManager::HandleMlrResponse(Coap::Msg *aMsg, Error aResult)
     else
     {
         BackboneRouter::Config config;
-        uint16_t               reregDelay;
 
-        // The Device has just attempted a Multicast Listener Registration which failed, and it retries the same
-        // registration with a random time delay chosen in the interval [0, Reregistration Delay].
-        // This is required by Thread 1.2 Specification 5.24.2.3
+        // If a registration attempt fails, retry it after a random
+        // delay (same as re-registration delay).
+
         if (Get<BackboneRouter::Leader>().GetConfig(config) == kErrorNone)
         {
-            reregDelay = config.mReregistrationDelay > 1
-                             ? Random::NonCrypto::GetUint16InRange(1, config.mReregistrationDelay)
-                             : 1;
-            ScheduleSend(reregDelay);
+            ScheduleSend(DetermineReregistrationDelay(config));
         }
     }
 }
 
-Error MlrManager::ParseMlrResponse(Error aResult, Coap::Msg *aMsg, uint8_t &aStatus, AddressArray &aFailedAddresses)
+Error Manager::ParseResponse(Error aResult, Coap::Msg *aMsg, uint8_t &aStatus, AddressArray &aFailedAddresses)
 {
-    Error       error;
+    Error       error = aResult;
     OffsetRange offsetRange;
 
-    aStatus = kMlrGeneralFailure;
+    aStatus = kStatusGeneralFailure;
+    aFailedAddresses.Clear();
 
-    VerifyOrExit(aResult == kErrorNone && aMsg != nullptr, error = kErrorParse);
+    SuccessOrExit(error);
+    VerifyOrExit(aMsg != nullptr, error = kErrorParse);
     VerifyOrExit(aMsg->GetCode() == Coap::kCodeChanged, error = kErrorParse);
 
     SuccessOrExit(error = Tlv::Find<ThreadStatusTlv>(aMsg->mMessage, aStatus));
 
     if (Tlv::FindTlvValueOffsetRange(aMsg->mMessage, Ip6AddressesTlv::kType, offsetRange) == kErrorNone)
     {
-        VerifyOrExit(offsetRange.GetLength() % sizeof(Ip6::Address) == 0, error = kErrorParse);
-        VerifyOrExit(offsetRange.GetLength() / sizeof(Ip6::Address) <= Ip6AddressesTlv::kMaxAddresses,
-                     error = kErrorParse);
-
         while (!offsetRange.IsEmpty())
         {
-            IgnoreError(aMsg->mMessage.Read(offsetRange, *aFailedAddresses.PushBack()));
+            Ip6::Address address;
+
+            SuccessOrExit(error = aMsg->mMessage.Read(offsetRange, address));
             offsetRange.AdvanceOffset(sizeof(Ip6::Address));
+
+            SuccessOrExit(error = aFailedAddresses.AddUnique(address));
         }
     }
 
-    VerifyOrExit(aFailedAddresses.IsEmpty() || aStatus != kMlrSuccess, error = kErrorParse);
+    if (aStatus == kStatusSuccess)
+    {
+        VerifyOrExit(aFailedAddresses.IsEmpty(), error = kErrorParse);
+
+        LogInfo("Receive MLR.rsp OK");
+        ExitNow();
+    }
+
+#if OT_SHOULD_LOG_AT(OT_LOG_LEVEL_WARN)
+    LogWarn("Receive MLR.rsp: status=%u, failedAddressNum=%u", aStatus, aFailedAddresses.GetLength());
+
+    for (const Ip6::Address &address : aFailedAddresses)
+    {
+        LogWarn("   %s", address.ToString().AsCString());
+    }
+#endif
 
 exit:
-    LogMlrResponse(aResult, error, aStatus, aFailedAddresses);
-    return aResult != kErrorNone ? aResult : error;
+    if (error != kErrorNone)
+    {
+        aFailedAddresses.Clear();
+    }
+
+    LogWarnOnError(error, "parse MLR.rsp");
+    return error;
 }
 
-void MlrManager::SetMulticastAddressMlrState(MlrState aFromState, MlrState aToState)
+void Manager::SetMulticastAddressState(State aFromState, State aToState)
 {
 #if OPENTHREAD_CONFIG_MLR_ENABLE
     for (Ip6::Netif::MulticastAddress &addr : Get<ThreadNetif>().GetMulticastAddresses())
@@ -502,20 +533,49 @@ void MlrManager::SetMulticastAddressMlrState(MlrState aFromState, MlrState aToSt
 #endif
 }
 
-void MlrManager::FinishMlr(bool aSuccess, const AddressArray &aFailedAddresses)
+bool Manager::DidRegisterSuccessfully(const Ip6::Address &aAddress, bool aSuccess, const AddressArray &aFailedAddresses)
 {
-    OT_ASSERT(mMlrPending);
+    // If the operation succeeded, all address registrations were successful.
+    //
+    // If it failed and the failed address list is empty, all registrations
+    // failed.
+    //
+    // If it failed and a non-empty failed address list is provided, only the
+    // addresses in the list failed (if an address is not in the list, its
+    // registration was successful).
 
-    mMlrPending = false;
+    bool didRegister;
+
+    if (aSuccess)
+    {
+        didRegister = true;
+    }
+    else if (aFailedAddresses.IsEmpty())
+    {
+        didRegister = false;
+    }
+    else
+    {
+        didRegister = !aFailedAddresses.Contains(aAddress);
+    }
+
+    return didRegister;
+}
+
+void Manager::Finish(bool aSuccess, const AddressArray &aFailedAddresses)
+{
+    OT_ASSERT(mPending);
+
+    mPending = false;
 
 #if OPENTHREAD_CONFIG_MLR_ENABLE
     for (Ip6::Netif::MulticastAddress &addr : Get<ThreadNetif>().GetMulticastAddresses())
     {
-        if (addr.Matches(kMlrStateRegistering))
+        if (addr.Matches(kStateRegistering))
         {
-            bool success = aSuccess || !aFailedAddresses.IsEmptyOrContains(addr.GetAddress());
+            bool didRegister = DidRegisterSuccessfully(addr.GetAddress(), aSuccess, aFailedAddresses);
 
-            addr.SetMlrState(success ? kMlrStateRegistered : kMlrStateToRegister);
+            addr.SetMlrState(didRegister ? kStateRegistered : kStateToRegister);
         }
     }
 #endif
@@ -529,25 +589,24 @@ void MlrManager::FinishMlr(bool aSuccess, const AddressArray &aFailedAddresses)
                 continue;
             }
 
-            if (addrEntry.GetMlrState(child) == kMlrStateRegistering)
+            if (addrEntry.GetMlrState(child) == kStateRegistering)
             {
-                bool success = aSuccess || !aFailedAddresses.IsEmptyOrContains(addrEntry);
+                bool didRegister = DidRegisterSuccessfully(addrEntry, aSuccess, aFailedAddresses);
 
-                addrEntry.SetMlrState(success ? kMlrStateRegistered : kMlrStateToRegister, child);
+                addrEntry.SetMlrState(didRegister ? kStateRegistered : kStateToRegister, child);
             }
         }
     }
 #endif
 
     LogMulticastAddresses();
-    CheckInvariants();
 }
 
-void MlrManager::HandleTimeTick(void)
+void Manager::HandleTimeTick(void)
 {
     if (mSendDelay > 0 && --mSendDelay == 0)
     {
-        SendMlr();
+        Send();
     }
 
     if (mReregistrationDelay > 0 && --mReregistrationDelay == 0)
@@ -558,63 +617,80 @@ void MlrManager::HandleTimeTick(void)
     UpdateTimeTickerRegistration();
 }
 
-void MlrManager::Reregister(void)
+void Manager::Reregister(void)
 {
     LogInfo("MLR Reregister!");
 
-    SetMulticastAddressMlrState(kMlrStateRegistered, kMlrStateToRegister);
-    CheckInvariants();
+    SetMulticastAddressState(kStateRegistered, kStateToRegister);
 
     ScheduleSend(0);
 
-    // Schedule for the next renewing.
-    UpdateReregistrationDelay(false);
+    ScheduleNextRegistration(kRenew);
 }
 
-void MlrManager::UpdateReregistrationDelay(bool aRereg)
+uint16_t Manager::DetermineReregistrationDelay(const BackboneRouter::Config &aConfig)
 {
-    bool needSendMlr = (Get<Mle::Mle>().IsFullThreadDevice() || Get<Mle::Mle>().GetParent().IsThreadVersion1p1()) &&
-                       Get<BackboneRouter::Leader>().HasPrimary();
+    uint16_t delay = 1;
 
-    if (!needSendMlr)
+    VerifyOrExit(aConfig.mReregistrationDelay > 1);
+    delay = Random::NonCrypto::GetUint16InRange(1, aConfig.mReregistrationDelay);
+
+exit:
+    return delay;
+}
+
+uint32_t Manager::DetermineRenewDelay(const BackboneRouter::Config &aConfig)
+{
+    // As per Thread spec, the renew delay is randomly chosen
+    // between (0.5 * MLR-Timeout) and (MLR-Timeout - 9 seconds).
+    // The `kRenewGuardTime`(9 sec) allows time for transmission,
+    // potential retransmissions, and acknowledgment before the
+    // actual timeout.
+
+    uint32_t timeout = Clamp<uint32_t>(aConfig.mMlrTimeout, BackboneRouter::kMinMlrTimeout, kLongRenewTimeout);
+
+    return Random::NonCrypto::GetUint32InRange((timeout / 2) + 1, timeout - kRenewGuardTime);
+}
+
+void Manager::ScheduleNextRegistration(RegistrationRequest aRequest)
+{
+    uint32_t               delay;
+    BackboneRouter::Config config;
+
+    if (!ShouldRegister())
     {
         mReregistrationDelay = 0;
+        ExitNow();
     }
-    else
+
+    IgnoreError(Get<BackboneRouter::Leader>().GetConfig(config));
+
+    switch (aRequest)
     {
-        BackboneRouter::Config config;
-        uint32_t               reregDelay;
-        uint32_t               effectiveMlrTimeout;
+    case kReregister:
+        delay = DetermineReregistrationDelay(config);
+        break;
 
-        IgnoreError(Get<BackboneRouter::Leader>().GetConfig(config));
+    case kRenew:
+        delay = DetermineRenewDelay(config);
+        break;
 
-        if (aRereg)
-        {
-            reregDelay = config.mReregistrationDelay > 1
-                             ? Random::NonCrypto::GetUint16InRange(1, config.mReregistrationDelay)
-                             : 1;
-        }
-        else
-        {
-            // Calculate renewing period according to Thread Spec. 5.24.2.3.2
-            // The random time t SHOULD be chosen such that (0.5* MLR-Timeout) < t < (MLR-Timeout – 9 seconds).
-            effectiveMlrTimeout = Max(config.mMlrTimeout, BackboneRouter::kMinMlrTimeout);
-            reregDelay = Random::NonCrypto::GetUint32InRange((effectiveMlrTimeout >> 1u) + 1, effectiveMlrTimeout - 9);
-        }
-
-        if (mReregistrationDelay == 0 || mReregistrationDelay > reregDelay)
-        {
-            mReregistrationDelay = reregDelay;
-        }
+    default:
+        ExitNow();
     }
 
-    UpdateTimeTickerRegistration();
+    if (mReregistrationDelay == 0 || mReregistrationDelay > delay)
+    {
+        mReregistrationDelay = delay;
 
-    LogDebg("MlrManager::UpdateReregistrationDelay: rereg=%d, needSendMlr=%d, ReregDelay=%lu", aRereg, needSendMlr,
-            ToUlong(mReregistrationDelay));
+        LogDebg("ScheduleNextRegistration() delay:%lu", ToUlong(delay));
+    }
+
+exit:
+    UpdateTimeTickerRegistration();
 }
 
-void MlrManager::LogMulticastAddresses(void)
+void Manager::LogMulticastAddresses(void)
 {
 #if OT_SHOULD_LOG_AT(OT_LOG_LEVEL_DEBG)
     LogDebg("-------- Multicast Addresses --------");
@@ -650,76 +726,19 @@ void MlrManager::LogMulticastAddresses(void)
 #endif // OT_SHOULD_LOG_AT(OT_LOG_LEVEL_DEBG)
 }
 
-void MlrManager::AddressArray::AddUnique(const Ip6::Address &aAddress)
+Error Manager::AddressArray::AddUnique(const Ip6::Address &aAddress)
 {
+    Error error = kErrorNone;
+
     if (!Contains(aAddress))
     {
-        IgnoreError(PushBack(aAddress));
+        error = PushBack(aAddress);
     }
+
+    return error;
 }
 
-void MlrManager::LogMlrResponse(Error aResult, Error aError, uint8_t aStatus, const AddressArray &aFailedAddresses)
-{
-    OT_UNUSED_VARIABLE(aResult);
-    OT_UNUSED_VARIABLE(aError);
-    OT_UNUSED_VARIABLE(aStatus);
-    OT_UNUSED_VARIABLE(aFailedAddresses);
-
-#if OT_SHOULD_LOG_AT(OT_LOG_LEVEL_WARN)
-    if (aResult == kErrorNone && aError == kErrorNone && aStatus == kMlrSuccess)
-    {
-        LogInfo("Receive MLR.rsp OK");
-    }
-    else
-    {
-        LogWarn("Receive MLR.rsp: result=%s, error=%s, status=%d, failedAddressNum=%d", ErrorToString(aResult),
-                ErrorToString(aError), aStatus, aFailedAddresses.GetLength());
-
-        for (const Ip6::Address &address : aFailedAddresses)
-        {
-            LogWarn("MA failed: %s", address.ToString().AsCString());
-        }
-    }
-#endif
-}
-
-void MlrManager::CheckInvariants(void) const
-{
-#if OPENTHREAD_EXAMPLES_SIMULATION && OPENTHREAD_CONFIG_ASSERT_ENABLE
-    uint16_t registeringNum = 0;
-
-    OT_UNUSED_VARIABLE(registeringNum);
-
-    OT_ASSERT(!mMlrPending || mSendDelay == 0);
-
-#if OPENTHREAD_CONFIG_MLR_ENABLE
-    for (Ip6::Netif::MulticastAddress &addr : Get<ThreadNetif>().GetMulticastAddresses())
-    {
-        if (addr.Matches(kMlrStateRegistering))
-        {
-            registeringNum++;
-        }
-    }
-#endif
-#if OPENTHREAD_FTD && OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
-    for (const Child &child : Get<ChildTable>().Iterate(Child::kInStateValid))
-    {
-        for (const Child::Ip6AddrEntry &addrEntry : child.GetIp6Addresses())
-        {
-            if (!addrEntry.IsMulticastLargerThanRealmLocal())
-            {
-                continue;
-            }
-
-            registeringNum += (addrEntry.GetMlrState(child) == kMlrStateRegistering);
-        }
-    }
-#endif
-
-    OT_ASSERT(registeringNum == 0 || mMlrPending);
-#endif // OPENTHREAD_EXAMPLES_SIMULATION
-}
-
+} // namespace Mlr
 } // namespace ot
 
 #endif // OPENTHREAD_CONFIG_MLR_ENABLE
