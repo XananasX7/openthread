@@ -38,10 +38,6 @@
 
 #if OPENTHREAD_CONFIG_BLE_TCAT_ENABLE
 
-#if !OPENTHREAD_CONFIG_UPTIME_ENABLE
-#error "OPENTHREAD_CONFIG_UPTIME_ENABLE is required for TCAT agent"
-#endif
-
 #include <openthread/netdiag.h>
 #include <openthread/tcat.h>
 #include <openthread/platform/ble.h>
@@ -52,7 +48,6 @@
 #include "common/log.hpp"
 #include "common/message.hpp"
 #include "common/non_copyable.hpp"
-#include "common/uptime.hpp"
 #include "mac/mac_types.hpp"
 #include "meshcop/dataset.hpp"
 #include "meshcop/meshcop.hpp"
@@ -177,6 +172,7 @@ public:
         kTlvPresentPskcHash           = 0x11, ///< TCAT commissioner rights elevation request TLV using PSKc hash
         kTlvPresentInstallCodeHash    = 0x12, ///< TCAT commissioner rights elevation request TLV using install code
         kTlvRequestRandomNumChallenge = 0x13, ///< TCAT random number challenge query TLV
+        kTlvRequestPskdHash           = 0x14, ///< TCAT PSKd hash request TLV
 
         // Command Class Commissioning
         kTlvSetActiveOperationalDataset    = 0x20, ///< TCAT active operational dataset TLV
@@ -467,6 +463,11 @@ private:
     Error HandlePresentPskcHash(const Message &aIncomingMessage, uint16_t aOffset, uint16_t aLength);
     Error HandlePresentInstallCodeHash(const Message &aIncomingMessage, uint16_t aOffset, uint16_t aLength);
     Error HandleRequestRandomNumberChallenge(Message &aOutgoingMessage, bool &aResponse);
+    Error HandleRequestPskdHash(const Message &aIncomingMessage,
+                                Message       &aOutgoingMessage,
+                                uint16_t       aOffset,
+                                uint16_t       aLength,
+                                bool          &aResponse);
     Error HandleStartThreadInterface(void);
     Error HandleStopThreadInterface(void);
     Error HandleGetCommissionerCertificate(Message &aOutgoingMessage, bool &aResponse);
@@ -489,18 +490,16 @@ private:
                                               const Dataset    *aCommSuppliedDataset) const;
     uint8_t CheckAuthorizationRequirements(CommandClassFlags aFlagsChecked, Dataset::Info *aActiveDatasetInfo) const;
 
-    static constexpr uint16_t kPingPayloadMaxLength        = 512;
-    static constexpr uint16_t kProvisioningUrlMaxLength    = OT_NETWORK_DIAGNOSTIC_MAX_VENDOR_APP_URL_TLV_LENGTH;
-    static constexpr uint16_t kMaxPskdLength               = OT_JOINER_MAX_PSKD_LENGTH;
-    static constexpr uint16_t kTcatMaxDeviceIdSize         = OT_TCAT_MAX_DEVICEID_SIZE;
-    static constexpr uint16_t kInstallCodeMaxSize          = 255;
-    static constexpr uint16_t kCommissionerCertMaxLength   = 1024;
-    static constexpr uint16_t kBufferReserve               = 2048 / (Buffer::kSize - sizeof(otMessageBuffer)) + 1;
-    static constexpr uint8_t  kServiceNameMaxLength        = OT_TCAT_SERVICE_NAME_MAX_LENGTH;
-    static constexpr uint8_t  kApplicationLayerMaxCount    = OT_TCAT_APPLICATION_LAYER_MAX_COUNT;
-    static constexpr uint16_t kTcatTmfEnableDefaultSec     = OT_TCAT_ENABLE_MAX;
-    static constexpr uint32_t kHashVerificationAttemptTime = 5;
-    static constexpr uint8_t  kHashVerificationMaxAttempts = 10;
+    static constexpr uint16_t kPingPayloadMaxLength      = 512;
+    static constexpr uint16_t kProvisioningUrlMaxLength  = OT_NETWORK_DIAGNOSTIC_MAX_VENDOR_APP_URL_TLV_LENGTH;
+    static constexpr uint16_t kMaxPskdLength             = OT_JOINER_MAX_PSKD_LENGTH;
+    static constexpr uint16_t kTcatMaxDeviceIdSize       = OT_TCAT_MAX_DEVICEID_SIZE;
+    static constexpr uint16_t kInstallCodeMaxSize        = 255;
+    static constexpr uint16_t kCommissionerCertMaxLength = 1024;
+    static constexpr uint16_t kBufferReserve             = 2048 / (Buffer::kSize - sizeof(otMessageBuffer)) + 1;
+    static constexpr uint8_t  kServiceNameMaxLength      = OT_TCAT_SERVICE_NAME_MAX_LENGTH;
+    static constexpr uint8_t  kApplicationLayerMaxCount  = OT_TCAT_APPLICATION_LAYER_MAX_COUNT;
+    static constexpr uint16_t kTcatTmfEnableDefaultSec   = OT_TCAT_ENABLE_MAX;
 
     const VendorInfo                *mVendorInfo;
     Callback<JoinCallback>           mJoinCallback;
@@ -525,8 +524,6 @@ private:
     using ExpireTimer = TimerMilliIn<TcatAgent, &TcatAgent::HandleTimer>;
     ExpireTimer mActiveOrStandbyTimer;
     uint32_t    mTcatActiveDurationMs;
-    UptimeSec   mLastHashVerificationTimestamp;
-    uint8_t     mHashVerificationAttempts;
 };
 
 DeclareTmfHandler(TcatAgent, kUriTcatEnable);

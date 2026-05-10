@@ -42,17 +42,19 @@ void Tasklet::Post(void)
 {
     if (!IsPosted())
     {
-        Get<Scheduler>().mPostedQueue.PostTasklet(*this);
+        Get<Scheduler>().PostTasklet(*this);
     }
 }
 
 void Tasklet::Unpost(void)
 {
-    Get<Scheduler>().mPostedQueue.RemoveTasklet(*this);
-    Get<Scheduler>().mRunningQueue.RemoveTasklet(*this);
+    if (IsPosted())
+    {
+        Get<Scheduler>().RemoveTasklet(*this);
+    }
 }
 
-void Tasklet::Scheduler::Queue::PostTasklet(Tasklet &aTasklet)
+void Tasklet::Scheduler::PostTasklet(Tasklet &aTasklet)
 {
     // Tasklets are saved in a circular singly linked list.
 
@@ -70,24 +72,13 @@ void Tasklet::Scheduler::Queue::PostTasklet(Tasklet &aTasklet)
     }
 }
 
-void Tasklet::Scheduler::Queue::RemoveTasklet(Tasklet &aTasklet)
+void Tasklet::Scheduler::RemoveTasklet(Tasklet &aTasklet)
 {
-    Tasklet *prev;
-
-    VerifyOrExit(aTasklet.IsPosted());
-
-    VerifyOrExit(!IsEmpty());
-
-    prev = mTail;
+    Tasklet *prev = mTail;
 
     while (prev->mNext != &aTasklet)
     {
         prev = prev->mNext;
-
-        if (prev == mTail)
-        {
-            ExitNow();
-        }
     }
 
     prev->mNext    = aTasklet.mNext;
@@ -97,42 +88,34 @@ void Tasklet::Scheduler::Queue::RemoveTasklet(Tasklet &aTasklet)
     {
         mTail = (prev != &aTasklet) ? prev : nullptr;
     }
-
-exit:
-    return;
-}
-
-Tasklet *Tasklet::Scheduler::Queue::PopTasklet(void)
-{
-    Tasklet *tasklet;
-
-    if (IsEmpty())
-    {
-        tasklet = nullptr;
-    }
-    else
-    {
-        tasklet = mTail->mNext;
-        RemoveTasklet(*tasklet);
-    }
-
-    return tasklet;
 }
 
 void Tasklet::Scheduler::ProcessQueuedTasklets(void)
 {
-    Tasklet *tasklet;
+    Tasklet *tail = mTail;
 
-    // We transfer all currently posted tasklets to the `mRunningQueue` and
-    // clear the `mPostedQueue`. This ensures that any new tasklet posted
-    // while we are processing `mRunningQueue` will be added to `mPostedQueue`
-    // and will trigger a call to `otTaskletsSignalPending()`.
+    // This method processes all tasklets queued when this is called. We
+    // keep a copy the current list and then clear the main list by
+    // setting `mTail` to `nullptr`. A newly posted tasklet while
+    // processing the currently queued tasklets will then trigger a call
+    // to `otTaskletsSignalPending()`.
 
-    mRunningQueue = mPostedQueue;
-    mPostedQueue.Clear();
+    mTail = nullptr;
 
-    while ((tasklet = mRunningQueue.PopTasklet()) != nullptr)
+    while (tail != nullptr)
     {
+        Tasklet *tasklet = tail->mNext;
+
+        if (tasklet == tail)
+        {
+            tail = nullptr;
+        }
+        else
+        {
+            tail->mNext = tasklet->mNext;
+        }
+
+        tasklet->mNext = nullptr;
         tasklet->RunTask();
     }
 }

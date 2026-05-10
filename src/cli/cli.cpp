@@ -71,6 +71,9 @@
 namespace ot {
 namespace Cli {
 
+Interpreter *Interpreter::sInterpreter = nullptr;
+static OT_DEFINE_ALIGNED_VAR(sInterpreterRaw, sizeof(Interpreter), uint64_t);
+
 Interpreter::Interpreter(Instance *aInstance, otCliOutputCallback aCallback, void *aContext)
     : OutputImplementer(aCallback, aContext)
     , Utils(aInstance, *this)
@@ -397,28 +400,21 @@ otError Interpreter::ProcessUserCommands(Arg aArgs[])
 
 otError Interpreter::SetUserCommands(const otCliCommand *aCommands, uint8_t aLength, void *aContext)
 {
-    otError error = OT_ERROR_NONE;
+    otError error = OT_ERROR_FAILED;
 
     for (UserCommandsEntry &entry : mUserCommands)
     {
-        if (entry.mCommands == aCommands)
-        {
-            // Ignore if already registered.
-            ExitNow();
-        }
-
         if (entry.mCommands == nullptr)
         {
             entry.mCommands = aCommands;
             entry.mLength   = aLength;
             entry.mContext  = aContext;
-            ExitNow();
+
+            error = OT_ERROR_NONE;
+            break;
         }
     }
 
-    error = OT_ERROR_NO_BUFS;
-
-exit:
     return error;
 }
 
@@ -7082,32 +7078,6 @@ template <> otError Interpreter::Process<Cmd("unsecureport")>(Arg aArgs[])
 
         OutputNewLine();
     }
-#if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
-    /**
-     * @cli unsecureport allwhendisabled
-     * @code
-     * unsecureport allwhendisabled
-     * Disabled
-     * Done
-     * @endcode
-     * @par api_copy
-     * #otIp6IsUnsecureAllowedWhenDisabled
-     */
-    else if (aArgs[0] == "allwhendisabled")
-    {
-        /**
-         * @cli unsecureport allwhendisabled (enable, disable)
-         * @code
-         * unsecureport allwhendisabled enable
-         * Done
-         * @endcode
-         * @cparam unsecureport allwhendisabled @ca{enable|disable}
-         * @par api_copy
-         * #otIp6SetAllowUnsecureWhenDisabled
-         */
-        error = ProcessEnableDisable(aArgs + 1, otIp6IsUnsecureAllowedWhenDisabled, otIp6SetAllowUnsecureWhenDisabled);
-    }
-#endif // OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
     else
     {
         error = OT_ERROR_INVALID_COMMAND;
@@ -7656,53 +7626,6 @@ template <> otError Interpreter::Process<Cmd("vendor")>(Arg aArgs[])
          */
         error = ProcessGetSet(aArgs, otThreadGetVendorAppUrl, otThreadSetVendorAppUrl);
 #endif
-    }
-    /**
-     * @cli vendor oui
-     * @code
-     * vendor oui
-     * B4-A6-61
-     * Done
-     * @endcode
-     * @par api_copy
-     * #otThreadGetVendorOui
-     */
-    else if (aArgs[0] == "oui")
-    {
-        if (aArgs[1].IsEmpty())
-        {
-            uint32_t oui = otThreadGetVendorOui(GetInstancePtr());
-
-            if (oui == OT_THREAD_UNSPECIFIED_VENDOR_OUI)
-            {
-                OutputLine("unspecified");
-            }
-            else
-            {
-                OutputLine("%02X-%02X-%02X", static_cast<uint8_t>((oui >> 16) & 0xff),
-                           static_cast<uint8_t>((oui >> 8) & 0xff), static_cast<uint8_t>(oui & 0xff));
-            }
-
-            error = OT_ERROR_NONE;
-        }
-        else
-        {
-#if OPENTHREAD_CONFIG_NET_DIAG_VENDOR_INFO_SET_API_ENABLE
-            /**
-             * @cli vendor oui (set)
-             * @code
-             * vendor oui 0xb4a661
-             * Done
-             * @endcode
-             * @par api_copy
-             * #otThreadSetVendorOui
-             * @cparam vendor oui @ca{oui}
-             */
-            error = ProcessSet(aArgs + 1, otThreadSetVendorOui);
-#else
-            error = OT_ERROR_INVALID_ARGS;
-#endif
-        }
     }
 
     return error;
@@ -8501,49 +8424,11 @@ void Interpreter::HandleWakeupResult(otError aError) { OutputResult(aError); }
 
 #endif // OPENTHREAD_FTD || OPENTHREAD_MTD
 
-size_t Interpreter::GetSize(void) { return sizeof(Interpreter); }
-
-Interpreter *Interpreter::Init(void               *aBuffer,
-                               size_t              aSize,
-                               otInstance         *aInstance,
-                               otCliOutputCallback aCallback,
-                               void               *aContext)
+void Interpreter::Initialize(otInstance *aInstance, otCliOutputCallback aCallback, void *aContext)
 {
-    Interpreter *interpreter = nullptr;
-    Instance    *instance    = static_cast<Instance *>(aInstance);
+    Instance *instance = static_cast<Instance *>(aInstance);
 
-    VerifyOrExit(aSize >= sizeof(Interpreter));
-    interpreter = new (aBuffer) Interpreter(instance, aCallback, aContext);
-
-exit:
-    return interpreter;
-}
-
-#if OPENTHREAD_CONFIG_CLI_STATIC_INTERPRETER_ENABLE
-
-Interpreter *Interpreter::sInterpreter = nullptr;
-
-static OT_DEFINE_ALIGNED_VAR(sInterpreterRaw, sizeof(Interpreter), uint64_t);
-
-void Interpreter::Init(otInstance *aInstance, otCliOutputCallback aCallback, void *aContext)
-{
-    sInterpreter = Init(&sInterpreterRaw, sizeof(sInterpreterRaw), aInstance, aCallback, aContext);
-}
-
-#endif
-
-void Interpreter::Finalize(void)
-{
-    mTimer.Stop();
-
-#if (OPENTHREAD_FTD || OPENTHREAD_MTD) && OPENTHREAD_CONFIG_CLI_REGISTER_IP6_RECV_CALLBACK
-    otIp6SetReceiveCallback(GetInstancePtr(), nullptr, nullptr);
-#endif
-#if OPENTHREAD_CONFIG_DIAG_ENABLE
-    otDiagSetOutputCallback(GetInstancePtr(), nullptr, nullptr);
-#endif
-
-    this->~Interpreter();
+    Interpreter::sInterpreter = new (&sInterpreterRaw) Interpreter(instance, aCallback, aContext);
 }
 
 void Interpreter::OutputPrompt(void)
@@ -8892,6 +8777,55 @@ otError Interpreter::ProcessCommand(Arg aArgs[])
     }
 
     return error;
+}
+
+extern "C" void otCliInit(otInstance *aInstance, otCliOutputCallback aCallback, void *aContext)
+{
+    Interpreter::Initialize(aInstance, aCallback, aContext);
+
+#if OPENTHREAD_CONFIG_CLI_VENDOR_COMMANDS_ENABLE && OPENTHREAD_CONFIG_CLI_MAX_USER_CMD_ENTRIES > 1
+    otCliVendorSetUserCommands();
+#endif
+}
+
+extern "C" void otCliInputLine(char *aBuf) { Interpreter::GetInterpreter().ProcessLine(aBuf); }
+
+extern "C" otError otCliSetUserCommands(const otCliCommand *aUserCommands, uint8_t aLength, void *aContext)
+{
+    return Interpreter::GetInterpreter().SetUserCommands(aUserCommands, aLength, aContext);
+}
+
+extern "C" void otCliOutputBytes(const uint8_t *aBytes, uint8_t aLength)
+{
+    Interpreter::GetInterpreter().OutputBytes(aBytes, aLength);
+}
+
+extern "C" void otCliOutputFormat(const char *aFmt, ...)
+{
+    va_list aAp;
+    va_start(aAp, aFmt);
+    Interpreter::GetInterpreter().OutputFormatV(aFmt, aAp);
+    va_end(aAp);
+}
+
+extern "C" void otCliAppendResult(otError aError) { Interpreter::GetInterpreter().OutputResult(aError); }
+
+extern "C" void otCliPlatLogv(otLogLevel aLogLevel, otLogRegion aLogRegion, const char *aFormat, va_list aArgs)
+{
+    OT_UNUSED_VARIABLE(aLogLevel);
+    OT_UNUSED_VARIABLE(aLogRegion);
+
+    VerifyOrExit(Interpreter::IsInitialized());
+
+    // CLI output is being used for logging, so we set the flag
+    // `EmittingCommandOutput` to false indicate this.
+    Interpreter::GetInterpreter().SetEmittingCommandOutput(false);
+    Interpreter::GetInterpreter().OutputFormatV(aFormat, aArgs);
+    Interpreter::GetInterpreter().OutputNewLine();
+    Interpreter::GetInterpreter().SetEmittingCommandOutput(true);
+
+exit:
+    return;
 }
 
 } // namespace Cli

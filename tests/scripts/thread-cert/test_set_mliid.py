@@ -1,5 +1,6 @@
+#!/usr/bin/env python3
 #
-#  Copyright (c) 2026, The OpenThread Authors.
+#  Copyright (c) 2021, The OpenThread Authors.
 #  All rights reserved.
 #
 #  Redistribution and use in source and binary forms, with or without
@@ -26,45 +27,49 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 #
 
-name: Size Check
+import unittest
+import ipaddress
 
-on:
-  push:
-    branches:
-      - 'main'
-  pull_request:
-    branches:
-      - 'main'
+import config
+import thread_cert
 
-permissions:
-  contents: read
+LEADER = 1
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.repository == 'openthread/openthread' && github.run_id) || github.ref }}
-  cancel-in-progress: true
 
-jobs:
+class Test_SetMlIid(thread_cert.TestCase):
+    USE_MESSAGE_FACTORY = False
 
-  size-check:
-    runs-on: ubuntu-24.04
-    steps:
-    - name: Harden Runner
-      uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
-      with:
-        egress-policy: audit # TODO: change to 'egress-policy: block' after couple of runs
+    TOPOLOGY = {
+        LEADER: {
+            'mode': 'rdn',
+        },
+    }
 
-    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-    - name: Run
-      env:
-        PR_BODY: "${{ github.event.pull_request.body }}"
-        PR_NUMBER: "${{ github.event.pull_request.number }}"
-      run: |
-        ./script/check-size
-        cat /tmp/ot-size-report/report_pr >> $GITHUB_STEP_SUMMARY
-        echo "${{ github.event.pull_request.number }}" > /tmp/ot-size-report/pr_number
-    - name: Upload report
-      if: ${{ github.event_name == 'pull_request' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: report_pr
-        path: /tmp/ot-size-report
+    def test(self):
+        # Set ML-IID before Thread is enabled.
+        self.nodes[LEADER].set_mliid('1122334455667788')
+
+        self.nodes[LEADER].start()
+        self.simulator.go(config.LEADER_STARTUP_DELAY)
+        self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
+
+        # Ensure set ML-IID was effective.
+        mleid = self.nodes[LEADER].get_ip6_address(config.ADDRESS_TYPE.ML_EID)
+        self.assertEqual(b'\x11\x22\x33\x44\x55\x66\x77\x88', ipaddress.IPv6Address(mleid).packed[-8:])
+
+        # Ensure set ML-IID fail after Thread is enabled.
+        self.assertRaises(Exception, lambda: self.nodes[LEADER].set_mliid('5566778811223344'))
+
+        self.nodes[LEADER].reset()
+
+        self.nodes[LEADER].start()
+        self.simulator.go(config.LEADER_RESET_DELAY)
+        self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
+
+        # Ensure ML-IID is persistent after reset.
+        mleid = self.nodes[LEADER].get_ip6_address(config.ADDRESS_TYPE.ML_EID)
+        self.assertEqual(b'\x11\x22\x33\x44\x55\x66\x77\x88', ipaddress.IPv6Address(mleid).packed[-8:])
+
+
+if __name__ == '__main__':
+    unittest.main()

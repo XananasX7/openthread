@@ -457,14 +457,6 @@ public:
     const KekKeyMaterial &GetKek(void) const { return mKek; }
 
     /**
-     * Indicates whether or not the KEK is set.
-     *
-     * @retval TRUE   If the KEK is set.
-     * @retval FALSE  If the KEK is not set.
-     */
-    bool IsKekSet(void) const { return mIsKekSet; }
-
-    /**
      * Retrieves the KEK as literal `Kek` key.
      *
      * @param[out] aKek  A reference to a `Kek` to output the retrieved KEK.
@@ -484,11 +476,6 @@ public:
      * @param[in]  aKekBytes  A pointer to the KEK bytes.
      */
     void SetKek(const uint8_t *aKekBytes) { SetKek(*reinterpret_cast<const Kek *>(aKekBytes)); }
-
-    /**
-     * Clears the KEK.
-     */
-    void ClearKek(void);
 
     /**
      * Returns the current KEK Frame Counter value.
@@ -659,7 +646,6 @@ private:
 
     SecurityPolicy mSecurityPolicy;
     bool           mIsPskcSet : 1;
-    bool           mIsKekSet : 1;
 };
 
 /**

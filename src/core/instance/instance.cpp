@@ -44,12 +44,11 @@ namespace ot {
 #error "Exactly one of {OPENTHREAD_FTD, OPENTHREAD_MTD, OPENTHREAD_RADIO} MUST be set"
 #endif
 
-// Size of `ot::Instance` in `uint64_t` unit (aligned).
-constexpr size_t kInstanceSizeInUint64s = DivideAndRoundUp<size_t>(sizeof(Instance), sizeof(uint64_t));
-
 #if !OPENTHREAD_CONFIG_MULTIPLE_INSTANCE_ENABLE
-// The raw storage used for OpenThread instance (in single-instance case)
-uint64_t gInstanceRaw[kInstanceSizeInUint64s];
+
+// Define the raw storage used for OpenThread instance (in single-instance case).
+OT_DEFINE_ALIGNED_VAR(gInstanceRaw, sizeof(Instance), uint64_t);
+
 #endif
 
 #if OPENTHREAD_CONFIG_MULTIPLE_INSTANCE_ENABLE && OPENTHREAD_CONFIG_LOG_INSTANCE_AWARE_API_ENABLE
@@ -59,10 +58,11 @@ Instance *gActiveInstance = nullptr;
 
 #if OPENTHREAD_CONFIG_MULTIPLE_INSTANCE_ENABLE && OPENTHREAD_CONFIG_MULTIPLE_STATIC_INSTANCE_ENABLE
 
-constexpr size_t kMultiInstanceSizeInUint64s = (Instance::kNumStaticInstances * kInstanceSizeInUint64s);
+#define INSTANCE_SIZE_ALIGNED OT_ALIGNED_VAR_SIZE(sizeof(ot::Instance), uint64_t)
+#define MULTI_INSTANCE_SIZE (OPENTHREAD_CONFIG_MULTIPLE_INSTANCE_NUM * INSTANCE_SIZE_ALIGNED)
 
 // Define the raw storage used for OpenThread instance (in multi-instance case).
-static uint64_t gMultiInstanceRaw[kMultiInstanceSizeInUint64s];
+static uint64_t gMultiInstanceRaw[MULTI_INSTANCE_SIZE];
 
 #endif
 
@@ -383,19 +383,18 @@ Instance &Instance::Get(void)
 }
 
 #else // #if !OPENTHREAD_CONFIG_MULTIPLE_INSTANCE_ENABLE
-
 #if OPENTHREAD_CONFIG_MULTIPLE_STATIC_INSTANCE_ENABLE
 
 Instance *Instance::InitMultiple(uint8_t aIdx)
 {
     size_t    bufferSize;
-    uint64_t *instanceBuffer = gMultiInstanceRaw + aIdx * kInstanceSizeInUint64s;
+    uint64_t *instanceBuffer = gMultiInstanceRaw + aIdx * INSTANCE_SIZE_ALIGNED;
     Instance *instance       = reinterpret_cast<Instance *>(instanceBuffer);
 
-    VerifyOrExit(aIdx < kNumStaticInstances);
+    VerifyOrExit(aIdx < OPENTHREAD_CONFIG_MULTIPLE_INSTANCE_NUM);
     VerifyOrExit(!instance->mIsInitialized);
 
-    bufferSize = (&gMultiInstanceRaw[kMultiInstanceSizeInUint64s] - instanceBuffer) * sizeof(uint64_t);
+    bufferSize = (&gMultiInstanceRaw[MULTI_INSTANCE_SIZE] - instanceBuffer) * sizeof(uint64_t);
     instance   = Instance::Init(instanceBuffer, &bufferSize);
 
 exit:
@@ -404,13 +403,13 @@ exit:
 
 Instance &Instance::Get(uint8_t aIdx)
 {
-    void *instance = gMultiInstanceRaw + aIdx * kInstanceSizeInUint64s;
+    void *instance = gMultiInstanceRaw + aIdx * INSTANCE_SIZE_ALIGNED;
     return *static_cast<Instance *>(instance);
 }
 
 uint8_t Instance::GetIdx(Instance *aInstance)
 {
-    return static_cast<uint8_t>((reinterpret_cast<uint64_t *>(aInstance) - gMultiInstanceRaw) / kInstanceSizeInUint64s);
+    return static_cast<uint8_t>((reinterpret_cast<uint64_t *>(aInstance) - gMultiInstanceRaw) / INSTANCE_SIZE_ALIGNED);
 }
 
 #endif // #if OPENTHREAD_CONFIG_MULTIPLE_STATIC_INSTANCE_ENABLE
@@ -421,11 +420,8 @@ Instance *Instance::Init(void *aBuffer, size_t *aBufferSize)
 
     VerifyOrExit(aBufferSize != nullptr);
 
-    if (sizeof(Instance) > *aBufferSize)
-    {
-        *aBufferSize = kInstanceSizeInUint64s * sizeof(uint64_t);
-        ExitNow();
-    }
+    // Make sure the input buffer is big enough
+    VerifyOrExit(sizeof(Instance) <= *aBufferSize, *aBufferSize = sizeof(Instance));
 
     VerifyOrExit(aBuffer != nullptr);
 

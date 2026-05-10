@@ -49,7 +49,6 @@
 #include "common/non_copyable.hpp"
 #include "net/netif.hpp"
 #include "thread/dua_manager.hpp"
-#include "thread/mlr_types.hpp"
 #include "thread/network_data.hpp"
 #include "thread/tmf.hpp"
 
@@ -105,7 +104,7 @@ public:
      *
      * @param[in] aStatus  The status to respond.
      */
-    void ConfigNextMulticastListenerRegistrationResponse(Mlr::Status aStatus);
+    void ConfigNextMulticastListenerRegistrationResponse(MlrStatus aStatus);
 #endif
 #endif
 
@@ -173,7 +172,7 @@ private:
     void HandleMulticastListenerRegistration(const Coap::Msg &aMsg);
 
     void SendMulticastListenerRegistrationResponse(const Coap::Msg &aMsg,
-                                                   Mlr::Status      aStatus,
+                                                   MlrStatus        aStatus,
                                                    Ip6::Address    *aFailedAddresses,
                                                    uint8_t          aFailedAddressNum);
     void SendBackboneMulticastListenerRegistration(const Ip6::Address *aAddresses,
@@ -227,7 +226,7 @@ private:
     uint8_t                  mDuaResponseStatus;
 #endif
 #if OPENTHREAD_CONFIG_BACKBONE_ROUTER_MULTICAST_ROUTING_ENABLE
-    Mlr::Status mMlrResponseStatus;
+    MlrStatus mMlrResponseStatus;
 #endif
 #if OPENTHREAD_CONFIG_BACKBONE_ROUTER_DUA_NDPROXYING_ENABLE
     bool mDuaResponseIsSpecified : 1;

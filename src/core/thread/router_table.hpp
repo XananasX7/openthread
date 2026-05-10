@@ -242,22 +242,22 @@ public:
     const Router *FindRouterByRloc16(uint16_t aRloc16) const;
 
     /**
-     * Finds the router that is the next hop towards a given router.
+     * Finds the router that is the next hop of a given router.
      *
-     * @param[in]  aRouter  The destination router.
+     * @param[in]  aRouter  The router to find next hop of.
      *
      * @returns A pointer to the router or `nullptr` if the router could not be found.
      */
-    Router *FindNextHopTowards(const Router &aRouter) { return AsNonConst(AsConst(this)->FindNextHopTowards(aRouter)); }
+    Router *FindNextHopOf(const Router &aRouter) { return AsNonConst(AsConst(this)->FindNextHopOf(aRouter)); }
 
     /**
-     * Finds the router that is the next hop towards a given router.
+     * Finds the router that is the next hop of a given router.
      *
-     * @param[in]  aRouter  The destination router.
+     * @param[in]  aRouter  The router to find next hop of.
      *
      * @returns A pointer to the router or `nullptr` if the router could not be found.
      */
-    const Router *FindNextHopTowards(const Router &aRouter) const;
+    const Router *FindNextHopOf(const Router &aRouter) const;
 
     /**
      * Find the router for a given MAC Extended Address.
@@ -371,21 +371,16 @@ public:
     void GetRouterIdMask(Mle::RouterIdMask &aRouterIdMask) const;
 
     /**
-     * Appends a Route TLV to a given message.
+     * Fills a Route TLV.
      *
-     * If @p aDestRloc16 is not `Mle::kInvalidRloc16`, a compact format is used for the Route TLV by limiting the
-     * number of router entries to `kMaxRoutersInRouteTlvForLinkAccept`. This is used for Link Accept messages. In this
-     * case, we ensure that entries for this device, the leader, and the destination router (itself or its parent if it
-     * is a child) are always included.
+     * When @p aNeighbor is not `nullptr`, we limit the number of router entries to `kMaxRoutersInRouteTlvForLinkAccept`
+     * when populating `aRouteTlv`, so that the TLV can be appended in a Link Accept message. In this case, we ensure
+     * to include router entries associated with @p aNeighbor, leader, and this device itself.
      *
-     * @param[in,out] aMessage      The message to append the Route TLV to.
-     * @param[in]     aTlvType      The TLV type to use (e.g., `Tlv::kRoute`).
-     * @param[in]     aDestRloc16   The destination RLOC16. Used to determine whether to use the compact format.
-     *
-     * @retval kErrorNone     Successfully appended the Route TLV.
-     * @retval kErrorNoBufs   Insufficient available buffers to append the TLV.
+     * @param[out] aRouteTlv    A Route TLV to be filled.
+     * @param[in]  aNeighbor    A pointer to the receiver (in case TLV is for a Link Accept message).
      */
-    Error AppendRouteTlv(Message &aMessage, uint8_t aTlvType, uint16_t aDestRloc16 = Mle::kInvalidRloc16) const;
+    void FillRouteTlv(Mle::RouteTlv &aRouteTlv, const Neighbor *aNeighbor = nullptr) const;
 
     /**
      * Updates the router table and must be called with a one second period.

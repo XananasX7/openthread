@@ -173,16 +173,10 @@ Error Agent::Filter(void *aContext, const Msg &aRxMsg) { return static_cast<Agen
 
 Error Agent::Filter(const Msg &aRxMsg) const
 {
-    Error error = kErrorNone;
-
-    VerifyOrExit(IsTmfMessage(aRxMsg.mMessageInfo.GetPeerAddr(), aRxMsg.mMessageInfo.GetSockAddr(),
-                              aRxMsg.mMessageInfo.GetSockPort()),
-                 error = kErrorNotTmf);
-
-    VerifyOrExit(aRxMsg.mMessage.IsLinkSecurityEnabled(), error = kErrorSecurity);
-
-exit:
-    return error;
+    return IsTmfMessage(aRxMsg.mMessageInfo.GetPeerAddr(), aRxMsg.mMessageInfo.GetSockAddr(),
+                        aRxMsg.mMessageInfo.GetSockPort())
+               ? kErrorNone
+               : kErrorNotTmf;
 }
 
 bool Agent::IsTmfMessage(const Ip6::Address &aSourceAddress, const Ip6::Address &aDestAddress, uint16_t aDestPort) const

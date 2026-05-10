@@ -294,14 +294,14 @@ public:
          *
          * @returns The current Multicast Listener Registration state.
          */
-        Mlr::State GetMlrState(void) const { return static_cast<Mlr::State>(mData); }
+        MlrState GetMlrState(void) const { return static_cast<MlrState>(mData); }
 
         /**
          * Sets the Multicast Listener Registration (MLR) state.
          *
          * @param[in] aState  The new Multicast Listener Registration state.
          */
-        void SetMlrState(Mlr::State aState) { mData = aState; }
+        void SetMlrState(MlrState aState) { mData = aState; }
 
         /**
          * Indicates whether or not the address is an MLR candidate and matches a given MLR state.
@@ -311,7 +311,7 @@ public:
          * @retval TRUE  If the address is an MLR candidate and its state matches @p aMlrState.
          * @retval FALSE If the address is not an MLR candidate or its state does not match @p aMlrState.
          */
-        bool Matches(Mlr::State aMlrState) const;
+        bool Matches(MlrState aMlrState) const;
 #endif
 
     private:

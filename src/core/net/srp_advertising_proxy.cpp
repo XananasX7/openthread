@@ -1152,10 +1152,7 @@ void AdvertisingProxy::UnregisterKey(const char *aName, const char *aServiceType
 
 void AdvertisingProxy::CopyNameAndRemoveDomain(DnsName &aName, const char *aFullName)
 {
-    if (Dns::Name::ExtractLabels(aFullName, Get<Server>().GetDomain(), aName, sizeof(aName)) != kErrorNone)
-    {
-        aName[0] = kNullChar;
-    }
+    IgnoreError(Dns::Name::ExtractLabels(aFullName, Get<Server>().GetDomain(), aName, sizeof(aName)));
 }
 
 void AdvertisingProxy::HandleRegistered(otInstance *aInstance, otPlatDnssdRequestId aRequestId, otError aError)

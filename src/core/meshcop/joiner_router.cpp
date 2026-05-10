@@ -302,8 +302,6 @@ exit:
 
 void JoinerRouter::HandleJoinerEntrustResponse(Coap::Msg *aMsg, Error aResult)
 {
-    Get<KeyManager>().ClearKek();
-
     SendDelayedJoinerEntrust();
 
     VerifyOrExit(aResult == kErrorNone && aMsg != nullptr);

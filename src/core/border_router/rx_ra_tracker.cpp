@@ -727,7 +727,7 @@ void RxRaTracker::RemoveOrDeprecateOldEntries(TimeMilli aTimeThreshold)
         {
             if (entry.GetLastUpdateTime() <= aTimeThreshold)
             {
-                entry.Deprecate();
+                entry.ClearPreferredLifetime();
             }
         }
 
@@ -1096,7 +1096,10 @@ void RxRaTracker::HandleRouterTimer(void)
 
             for (OnLinkPrefix &entry : router.mOnLinkPrefixes)
             {
-                entry.Deprecate();
+                if (!entry.IsDeprecated())
+                {
+                    entry.ClearPreferredLifetime();
+                }
             }
 
             for (RoutePrefix &entry : router.mRoutePrefixes)

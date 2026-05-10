@@ -260,8 +260,8 @@ otError otIp6RegisterMulticastListeners(otInstance                             *
                                         otIp6RegisterMulticastListenersCallback aCallback,
                                         void                                   *aContext)
 {
-    return AsCoreType(aInstance).Get<Mlr::Manager>().RegisterMulticastListeners(AsCoreTypePtr(aAddresses), aAddressNum,
-                                                                                aTimeout, aCallback, aContext);
+    return AsCoreType(aInstance).Get<MlrManager>().RegisterMulticastListeners(AsCoreTypePtr(aAddresses), aAddressNum,
+                                                                              aTimeout, aCallback, aContext);
 }
 #endif
 
@@ -310,17 +310,5 @@ const otBorderRoutingCounters *otIp6GetBorderRoutingCounters(otInstance *aInstan
 void otIp6ResetBorderRoutingCounters(otInstance *aInstance)
 {
     AsCoreType(aInstance).Get<Ip6::Ip6>().ResetBorderRoutingCounters();
-}
-#endif
-
-#if OPENTHREAD_CONFIG_REFERENCE_DEVICE_ENABLE
-void otIp6SetAllowUnsecureWhenDisabled(otInstance *aInstance, bool aAllow)
-{
-    AsCoreType(aInstance).Get<Ip6::Filter>().SetAllowUnsecureWhenDisabled(aAllow);
-}
-
-bool otIp6IsUnsecureAllowedWhenDisabled(otInstance *aInstance)
-{
-    return AsCoreType(aInstance).Get<Ip6::Filter>().IsUnsecureAllowedWhenDisabled();
 }
 #endif

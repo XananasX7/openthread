@@ -1200,7 +1200,7 @@ template <> otError Br::Process<Cmd("counters")>(Arg aArgs[])
     otError error = OT_ERROR_NONE;
 
     VerifyOrExit(aArgs[0].IsEmpty(), error = OT_ERROR_INVALID_ARGS);
-    GetInterpreter().OutputBorderRouterCounters();
+    Interpreter::GetInterpreter().OutputBorderRouterCounters();
 
 exit:
     return error;

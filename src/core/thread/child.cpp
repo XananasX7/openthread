@@ -76,9 +76,9 @@ void Child::Info::SetFrom(const Child &aChild)
 
 #if OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
 
-Mlr::State Child::Ip6AddrEntry::GetMlrState(const Child &aChild) const
+MlrState Child::Ip6AddrEntry::GetMlrState(const Child &aChild) const
 {
-    Mlr::State                 state = Mlr::kStateRegistering;
+    MlrState                   state = kMlrStateRegistering;
     Ip6AddressArray::IndexType index;
 
     OT_ASSERT(aChild.mIp6Addresses.IsInArrayBuffer(this));
@@ -87,18 +87,18 @@ Mlr::State Child::Ip6AddrEntry::GetMlrState(const Child &aChild) const
 
     if (aChild.mMlrToRegisterSet.Has(index))
     {
-        state = Mlr::kStateToRegister;
+        state = kMlrStateToRegister;
     }
     else if (aChild.mMlrRegisteredSet.Has(index))
     {
-        state = Mlr::kStateRegistered;
+        state = kMlrStateRegistered;
     }
 
     return state;
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-void Child::Ip6AddrEntry::SetMlrState(Mlr::State aState, Child &aChild)
+void Child::Ip6AddrEntry::SetMlrState(MlrState aState, Child &aChild)
 {
     Ip6AddressArray::IndexType index;
 
@@ -106,8 +106,8 @@ void Child::Ip6AddrEntry::SetMlrState(Mlr::State aState, Child &aChild)
 
     index = aChild.mIp6Addresses.IndexOf(*this);
 
-    aChild.mMlrToRegisterSet.Update(index, aState == Mlr::kStateToRegister);
-    aChild.mMlrRegisteredSet.Update(index, aState == Mlr::kStateRegistered);
+    aChild.mMlrToRegisterSet.Update(index, aState == kMlrStateToRegister);
+    aChild.mMlrRegisteredSet.Update(index, aState == kMlrStateRegistered);
 }
 
 #endif // OPENTHREAD_CONFIG_TMF_PROXY_MLR_ENABLE
@@ -292,7 +292,7 @@ bool Child::HasMlrRegisteredAddress(const Ip6::Address &aAddress) const
 
     entry = mIp6Addresses.FindMatching(aAddress);
     VerifyOrExit(entry != nullptr);
-    hasAddress = entry->GetMlrState(*this) == Mlr::kStateRegistered;
+    hasAddress = entry->GetMlrState(*this) == kMlrStateRegistered;
 
 exit:
     return hasAddress;

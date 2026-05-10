@@ -278,7 +278,6 @@ set(COMMON_SOURCES
     thread/src_match_controller.cpp
     thread/thread_link_info.cpp
     thread/thread_netif.cpp
-    thread/thread_tlvs.cpp
     thread/time_sync_service.cpp
     thread/tmf.cpp
     thread/uri_paths.cpp

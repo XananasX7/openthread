@@ -249,6 +249,8 @@ void PingSender::HandlePingStatistics(const otPingSenderStatistics *aStatistics)
     }
 }
 
+void PingSender::OutputResult(otError aError) { Interpreter::GetInterpreter().OutputResult(aError); }
+
 } // namespace Cli
 } // namespace ot
 
